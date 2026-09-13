@@ -108,17 +108,22 @@ refresh** (`Ctrl+Shift+R`) — a plain refresh has served a stale bundle.
 ## Verify it works
 
 ```bash
-node test/parser.test.mjs      # tolerant reader over every truncation point
-node test/overlay.test.mjs     # incremental DOM patching, resize handle
-node test/apply.test.mjs       # registration, plus CSS/layout guards
-node test/highlight.test.mjs   # language detection and tokenising
-node test/host.test.mjs        # host-side diagnostics route
+node test/run-all.mjs
 ```
 
-All five exit 0.
+That runs six suites and prints one line each:
 
-Then make the model edit a file and watch the panel. If it stays empty, the panel's
-own diagnostics footer and the host log say why — see below.
+| Suite | What it covers |
+| --- | --- |
+| `parser.test.mjs` | the tolerant reader, truncating a real tool call at 25 points |
+| `apply.test.mjs` | registration, plus layout and manifest guards |
+| `host.test.mjs` | the diagnostics route end to end, without a server |
+| `highlight.test.mjs` | language detection and tokenising |
+| `overlay.test.mjs` | incremental DOM patching, resize, scroll, the finished state |
+| `audit.mjs` | static audit of the bundle: dead helpers, duplicate declarations, `require()` specifiers missing from `dsh.client.inject` |
+
+All six exit 0. Then make the model edit a file and watch the panel. If it stays
+empty, the panel's own diagnostics footer and the host log say why — see below.
 
 ## Diagnostics
 
