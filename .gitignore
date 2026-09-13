@@ -1,0 +1,26 @@
+# 第三方参考物
+#
+# `cline-src/` 是我为了对照 Cline 的流式 diff 行为而解包的 VSIX 源码，
+# `saoudrizwan.claude-dev-4.1.17.vsix` 是那份 VSIX 原件。两者都是他人的
+# 版权产物（Cline 是 Apache-2.0，但第三方打包产物混进来只会让仓库体积从
+# 200 KB 膨胀到 130 MB），因此不入库。
+cline-src/
+*.vsix
+
+# 运行时日志
+#
+# `diag.log` 是这个插件每 80 ms 追加一次的诊断流水，跑几分钟就有几 MB，
+# 而且内容是本机的会话数据。它只是开发期的证据通道，不是源码。
+diag.log
+*.log
+
+# 依赖与缓存
+node_modules/
+__pycache__/
+*.pyc
+
+# 编辑器与系统杂物
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

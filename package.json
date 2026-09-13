@@ -1,0 +1,32 @@
+{
+  "name": "dsh-plugin-live-diff",
+  "version": "0.1.0",
+  "description": "Live streaming diffs for DSH file edits: a growing diff card rendered while the model is still emitting the edit arguments.",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-tool"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js"
+  ]
+}
