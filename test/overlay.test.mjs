@@ -301,9 +301,16 @@ function headOf(node) {
 	return block === void 0 ? null : block.children[0];
 }
 
-/** The corner resize grip. Its className is exactly `rz`. */
+/** All four corner resize grips, in creation order: tl, tr, bl, br. */
+function gripsOf(node) {
+	return node.children.filter(
+		(child) => typeof child.className === "string" && child.className.startsWith("rz ")
+	);
+}
+
+/** The top-left grip, which the drag tests use as the reference corner. */
 function stripOf(node) {
-	return node.children.find((child) => child.className === "rz");
+	return node.children.find((child) => child.className === "rz rz-tl");
 }
 
 /** The header, which doubles as the move handle and hosts the buttons. */
@@ -720,29 +727,63 @@ test("拖动标题栏可移动面板，并切换到 left/top 定位", () => {
 	check("移动不改变高度", node.style.height.endsWith("px"));
 });
 
-test("角手柄同时改变宽度和高度", () => {
+test("四个角手柄各自的方向都正确", () => {
+	// Each corner grows the panel when dragged AWAY from its own corner, which means a
+	// grip on the left grows on a negative `dx` and one on the right on a positive
+	// `dx`; likewise the top on a negative `dy` and the bottom on a positive `dy`.
+	// Getting a sign wrong makes a grip shrink when it should grow, and vice versa —
+	// visible only by trying the specific corner.
 	const { node } = loadPlugin();
+	const grips = gripsOf(node);
+	check("存在四个角手柄", grips.length === 4,
+		`got ${grips.length}: ${grips.map((g) => g.className).join(", ")}`);
+	check("四个角互不重复",
+		new Set(grips.map((g) => g.className)).size === 4,
+		grips.map((g) => g.className).join(", "));
+
+	// name -> [widthSign, heightSign]: the sign a drag of +10,+10 should apply.
+	const expected = { "rz-tl": [-1, -1], "rz-tr": [1, -1], "rz-bl": [-1, 1], "rz-br": [1, 1] };
+
+	for (const grip of grips) {
+		const [widthSign, heightSign] = expected[grip.className.replace("rz ", "")];
+		// Fresh panel per corner so the clamp bounds never interfere.
+		const fresh = loadPlugin().node;
+		const target = gripsOf(fresh).find((g) => g.className === grip.className);
+		const startWidth = Number.parseFloat(fresh.style.width);
+		const startHeight = Number.parseFloat(fresh.style.height);
+
+		target.dispatch("pointerdown", { clientX: 500, clientY: 500, pointerId: 1 });
+		// Drag by +20,+20 and clamp the expectation into the same bounds the code uses:
+		// width in [WIDTH_MIN, maxWidth], height in [HEIGHT_MIN, viewport].
+		target.dispatch("pointermove", { clientX: 520, clientY: 520, pointerId: 1 });
+		const wantWidth = Math.min(1256, Math.max(280, startWidth + widthSign * 20));
+		const wantHeight = Math.min(768, Math.max(180, startHeight + heightSign * 20));
+		check(`${grip.className} 宽度方向正确`,
+			fresh.style.width === `${String(Math.round(wantWidth))}px`,
+			`${fresh.style.width}，期望 ${String(Math.round(wantWidth))}px`);
+		check(`${grip.className} 高度方向正确`,
+			fresh.style.height === `${String(Math.round(wantHeight))}px`,
+			`${fresh.style.height}，期望 ${String(Math.round(wantHeight))}px`);
+		target.dispatch("pointerup", { clientX: 520, clientY: 520, pointerId: 1 });
+	}
+});
+
+test("角手柄的尺寸被夹在合法区间", () => {
+	const { plugin, node } = loadPlugin();
 	const grip = stripOf(node);
 	check("存在角手柄", grip !== void 0, "没有 .rz 元素");
-	const startWidth = Number.parseFloat(node.style.width);
-	const startHeight = Number.parseFloat(node.style.height);
-
 	grip.dispatch("pointerdown", { clientX: 500, clientY: 500, pointerId: 1 });
-	// Dragging LEFT widens (the panel is right-anchored, so its left edge moves out)
-	// and dragging UP makes it taller (it is bottom-anchored).
-	grip.dispatch("pointermove", { clientX: 440, clientY: 440, pointerId: 1 });
-	check("左拖 60px 后变宽 60px",
-		node.style.width === `${String(Math.round(startWidth + 60))}px`, node.style.width);
-	check("上拖 60px 后变高 60px",
-		node.style.height === `${String(Math.round(startHeight + 60))}px`, node.style.height);
-
-	// Both are clamped, so the panel can never grow past the viewport.
+	// Drag far beyond both bounds at once.
 	grip.dispatch("pointermove", { clientX: -99999, clientY: -99999, pointerId: 1 });
 	const grownWidth = Number.parseFloat(node.style.width);
 	const grownHeight = Number.parseFloat(node.style.height);
-	check("宽度不超过上限", grownWidth <= 1256, String(grownWidth));
+	check("宽度不超过上限", grownWidth <= plugin.maxWidth(), String(grownWidth));
 	check("高度不超过视口", grownHeight <= 768, String(grownHeight));
-	check("高度不低于最小值", grownHeight >= 180, String(grownHeight));
+	grip.dispatch("pointermove", { clientX: 99999, clientY: 99999, pointerId: 1 });
+	check("宽度不小于最小值",
+		Number.parseFloat(node.style.width) >= plugin.WIDTH_MIN, node.style.width);
+	check("高度不小于最小值",
+		Number.parseFloat(node.style.height) >= plugin.HEIGHT_MIN, node.style.height);
 });
 
 test("拖拽不会吃掉标题栏按钮的点击", () => {
