@@ -175,6 +175,31 @@ assert.ok(!/var\(--dsw-/.test(source), "no theme variables — a diagnostic must
 // channel; this guard keeps the title out of the code.
 assert.ok(!/document\.title\s*=/.test(source), "the plugin must not overwrite document.title");
 
+// Every third-party module the client half `require`s must be declared in
+// `dsh.client.inject`.
+//
+// The declaration was `@deepseek-ai/dsh-client-ui-tool` while the code required
+// `@deepseek-ai/dsh-client-ui-primitives` — a leftover from an earlier design that
+// rendered through the tool package. Nothing failed, because the module table
+// resolves whatever the factory asks for; the declaration is what tells the shell
+// which packages must be on the boot graph, so a wrong one is a portability bug
+// that only shows up on someone else's install.
+const manifest = JSON.parse(readFileSync(join(here, "..", "package.json"), "utf8"));
+const declared = new Set(manifest.dsh?.client?.inject ?? []);
+const required = [...source.matchAll(/require\("([^"]+)"\)/g)].map((match) => match[1]);
+const builtin = new Set(["react", "react/jsx-runtime", "react-dom", "react-dom/client"]);
+for (const specifier of required) {
+	if (builtin.has(specifier)) continue;
+	assert.ok(declared.has(specifier),
+		`client requires ${specifier} but dsh.client.inject does not declare it`);
+}
+// And the reverse: a declared package the code never imports is a stale entry that
+// would drag an unrelated package onto the boot graph.
+for (const specifier of declared) {
+	assert.ok(required.includes(specifier),
+		`dsh.client.inject declares ${specifier} but the client never requires it`);
+}
+
 console.log("apply(): all assertions passed");
 console.log(`  sidebar tab type: kind=${tab.kind} id=${tab.id} priority=${tab.priority}`);
 console.log(`  slot injections: ${recorded.slotInjections.map((entry) => entry.slot).join(", ")}`);

@@ -46,6 +46,29 @@ if (typeof oldText !== "string" || typeof newText !== "string") return null;
 
 **只接管渲染。** 不写你的文件，也不修改任何其他包。
 
+## 环境要求
+
+在 **DSH `0.1.5-rc.1`** / Windows 上开发并验证（`cordis` 4.0.2、
+`dsh-api-session-controller` 0.1.5-rc.2）。
+
+这个插件是通过 DSH 的**内部**客户端接口接进去的，**不是**一套已发布的扩展 API。
+下面这些都没有版本承诺：
+
+| 依赖的东西 | 用途 |
+| --- | --- |
+| `ctx.sessions` 客户端服务 | 读取会话事件窗口 —— 唯一携带流式 `tool-call-delta` chunk 的数据源 |
+| `ctx.slots` / `ctx.sidebarRightTabs` | 注册聊天记录卡片与侧边栏标签类型 |
+| `@deepseek-ai/dsh-client-ui-primitives`（`DiffBlock`） | 聊天记录里的 diff 卡片 |
+| `ctx.webServer` + `ctx.clientModules` | 宿主侧 `/live-diff-diag` 诊断路由 |
+| 针对 `edit` / `write` 的 keyed `tool.call.toolview` | **替换** DSH 自带的 `FileMutationRow` |
+
+最后一行是最脆的一环：keyed 注册会**替换**官方那一行，也就是说这个插件是在**故意覆盖
+DSH 自带组件**。如果某次 DSH 升级改了工具 key 名、改了 `toolview` 契约，或者重构了会话
+事件窗口，它就会失效——而且大概率表现为**面板空白**，而不是报错。
+
+如果你用的不是同一个 DSH 版本，可以先装上试试，然后看诊断输出（见下）：面板会如实报告
+"它看到了什么、没看到什么"，而不是静默失败。
+
 ## 安装
 
 两部分，都在 DSH 自己的文件之外。

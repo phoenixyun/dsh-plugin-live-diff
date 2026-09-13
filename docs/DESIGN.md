@@ -377,7 +377,7 @@ this bundle's renderer matches.
 | Path | Role |
 | --- | --- |
 | `lib/client.js` | Browser half: incremental reader, diff derivation, the card. |
-| `lib/index.js` | Host half: empty `apply`, the convention for a pure-UI plugin. |
+| `lib/index.js` | Host half: registers the `/live-diff-diag` webServer route the browser beacons to. `inject = ["webServer", "clientModules"]`. |
 | `package.json` | `dsh.client` declaration that puts the browser half on the Web boot graph. |
 | `test/parser.test.mjs` | Regression tests over every truncation point of a real call. |
 

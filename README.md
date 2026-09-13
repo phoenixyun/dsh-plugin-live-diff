@@ -50,6 +50,31 @@ reader, and a surface to put the result on.
 It replaces rendering only. It writes nothing to your files and modifies no other
 package.
 
+## Requirements
+
+Built and verified against **DSH `0.1.5-rc.1`** on Windows (`cordis` 4.0.2,
+`dsh-api-session-controller` 0.1.5-rc.2).
+
+This plugin talks to DSH through its **internal** client surfaces, not a published
+extension API. Nothing here is versioned or guaranteed:
+
+| What it relies on | Used for |
+| --- | --- |
+| `ctx.sessions` client service | reading the session event window — the only source carrying streaming `tool-call-delta` chunks |
+| `ctx.slots` / `ctx.sidebarRightTabs` | registering the transcript card and the sidebar tab type |
+| `@deepseek-ai/dsh-client-ui-primitives` (`DiffBlock`) | the chat transcript card |
+| `ctx.webServer` + `ctx.clientModules` | the host-side `/live-diff-diag` route |
+| keyed `tool.call.toolview` entries for `edit` / `write` | **replacing** the shipped `FileMutationRow` for those two tools |
+
+That last row is the sharpest edge: a keyed registration replaces the shipped row,
+so this plugin deliberately overrides a component DSH ships. A DSH upgrade that
+renames the tool keys, changes the `toolview` contract, or restructures the session
+event window will break it — most likely by showing an empty panel rather than by
+raising an error.
+
+If you are on a different DSH build, try it and read the diagnostics (below); the
+panel reports what it can and cannot see rather than failing silently.
+
 ## Install
 
 Two pieces, both outside DSH's own files.
