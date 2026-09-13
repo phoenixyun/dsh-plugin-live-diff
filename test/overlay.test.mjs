@@ -27,19 +27,68 @@ function createTextNode(text) {
 }
 
 function createElement(tag) {
+	// `style` mirrors the real object more closely than a bag of fields: assigning
+	// `cssText` parses out the individual properties, so `style.width` survives a
+	// `cssText` assignment. Without that, the plugin's own `style.width` readback
+	// (used for the resize start width) returned "" in the shim while a browser
+	// would have returned the value — the assertions were testing the shim.
+	const style = { display: "", width: "" };
+	let cssText = "";
+	Object.defineProperty(style, "cssText", {
+		get: () => cssText,
+		set: (value) => {
+			cssText = String(value);
+			for (const declaration of cssText.split(";")) {
+				const colon = declaration.indexOf(":");
+				if (colon <= 0) continue;
+				const name = declaration.slice(0, colon).trim();
+				const property = name.replace(/-([a-z])/g, (_, ch) => ch.toUpperCase());
+				if (property === "cssText" || property === "") continue;
+				style[property] = declaration.slice(colon + 1).trim();
+			}
+		}
+	});
 	const element = {
 		nodeType: 1,
 		tagName: String(tag).toUpperCase(),
 		childNodes: [],
 		parentNode: null,
-		style: { cssText: "", display: "", width: "" },
+		style,
 		className: "",
 		title: "",
 		id: "",
-		textContent: "",
 		innerHTML: "",
 		listeners: {}
 	};
+	// `textContent` is derived from the child nodes, like the real property, rather
+	// than stored as a plain field. A plain field made `element.textContent` stay
+	// empty after `appendChild(textNode)`, so assertions on rendered text were
+	// reading a value the DOM would never have had.
+	Object.defineProperty(element, "textContent", {
+		get() {
+			if (element.childNodes.length === 0) return element.__text ?? "";
+			return element.childNodes.map((node) => node.textContent ?? node.text ?? "").join("");
+		},
+		set(value) {
+			element.childNodes.length = 0;
+			element.__text = String(value);
+		}
+	});
+	// `innerHTML` is write-counted.
+	//
+	// This is the only way to observe the property the plugin is *for*: whether a
+	// row's markup was rewritten on a tick where nothing about it changed. A plain
+	// field cannot distinguish "wrote the same string again" from "did not write",
+	// which made the anti-flicker assertion tautological — a version that rewrote
+	// every row on every tick passed the whole suite.
+	element.__htmlWrites = 0;
+	Object.defineProperty(element, "innerHTML", {
+		get() { return element.__html ?? ""; },
+		set(value) {
+			element.__html = String(value);
+			element.__htmlWrites += 1;
+		}
+	});
 	Object.defineProperty(element, "children", {
 		get: () => element.childNodes.filter((node) => node.nodeType === 1)
 	});
@@ -136,7 +185,18 @@ function installDom() {
 				setItem: (key, value) => { store.set(key, String(value)); },
 				removeItem: (key) => { store.delete(key); }
 			},
-			addEventListener: () => {}
+			// Recorded so a test can prove a listener was REMOVED, not merely added.
+			// A leaked `window` listener is invisible to behaviour assertions — it
+			// only shows up as one more callback per plugin load.
+			listeners: new Map(),
+			addEventListener(type, handler) {
+				if (!this.listeners.has(type)) this.listeners.set(type, new Set());
+				this.listeners.get(type).add(handler);
+			},
+			removeEventListener(type, handler) {
+				const set = this.listeners.get(type);
+				if (set !== void 0) set.delete(handler);
+			}
 		},
 		store
 	};
@@ -335,16 +395,93 @@ test("连续 40 帧流式增长：既有行元素全程不被替换", () => {
 });
 
 test("相同文本不重复写 DOM（动画不会重启动）", () => {
+	// This asserts the property the whole plugin exists for, and it has to be
+	// observed through a write counter.
+	//
+	// The previous version captured `text.__text` before the second patch and
+	// compared it afterwards — but `__text` and `innerHTML` are assigned together in
+	// the same branch, so the assertion held whether or not the DOM was touched.
+	// Verified: replacing the dedupe guard with `if (true) {` (rewriting every row's
+	// markup on every tick, i.e. exactly the flicker bug) kept the whole suite green.
 	const { plugin, node } = loadPlugin();
 	const view = plugin.buildDiffView({
 		path: "/a/b.py", oldText: null, newText: "x = 1", streaming: true
 	});
 	plugin.patchOverlayList(node.__list, [view]);
 	const text = rowsOf(node)[0].children[2];
-	const painted = text.__text;
+	const writesAfterFirst = text.__htmlWrites;
+	check("首次绘制写入了 markup", writesAfterFirst === 1, `got ${String(writesAfterFirst)}`);
+
 	plugin.patchOverlayList(node.__list, [view]);
-	check("文本节点未被重写",
-		rowsOf(node)[0].children[2] === text && text.__text === painted);
+	check("文本未变时不重写 markup",
+		text.__htmlWrites === writesAfterFirst,
+		`writes went ${String(writesAfterFirst)} -> ${String(text.__htmlWrites)}`);
+	check("仍是同一个文本节点", rowsOf(node)[0].children[2] === text);
+
+	// And the counter must actually be able to move, or the assertion above is
+	// vacuous for the opposite reason.
+	plugin.patchOverlayList(node.__list, [plugin.buildDiffView({
+		path: "/a/b.py", oldText: null, newText: "x = 2", streaming: true
+	})]);
+	check("文本变化时确实重写", text.__htmlWrites > writesAfterFirst,
+		`writes stayed at ${String(text.__htmlWrites)}`);
+});
+
+test("写入结束后不残留 cur 高亮", () => {
+	// The "finished" branch of `renderOverlay` had no coverage at all: the existing
+	// empty-state test runs on a fresh module, which takes the placeholder branch
+	// instead. That branch cleared `caret` but not `current`, and `current` is what
+	// drives the `.cur` wash.
+	const { plugin, node } = loadPlugin();
+	const frame = {
+		entryCount: 1, transientCount: 2, deltaCount: 3, accumulating: 1,
+		entryTypes: new Map(), chunkTypes: new Map(), toolNames: ["write"], sequence: "", reason: "deltas present"
+	};
+	plugin.renderOverlay(
+		[{ callId: "stream:0", toolName: "write", diff: { path: "/a/b.py", oldText: null, newText: "a\nb", streaming: true } }],
+		frame,
+		{ broken: void 0 }
+	);
+	check("流式时最后一行带 cur",
+		rowsOf(node).some((row) => row.className.includes("cur")));
+
+	// Settle: entries empty, but something was on screen.
+	plugin.renderOverlay([], { ...frame, entryCount: 0, transientCount: 0, deltaCount: 0, accumulating: 0, reason: "idle" }, { broken: void 0 });
+	const rows = rowsOf(node);
+	check("结束后无 cur 高亮", rows.every((row) => !row.className.includes("cur")),
+		JSON.stringify(rows.map((row) => row.className)));
+	check("结束后无光标",
+		rows.every((row) => row.children[2].lastChild === null || row.children[2].lastChild.className !== "c"));
+	check("结束后保留了内容", rows.length === 2, `got ${String(rows.length)}`);
+});
+
+test("行符号列随 kind 变化而更新", () => {
+	// Rows are matched to elements by index while their KIND is recomputed every
+	// tick, so a row can change from context to addition in place. The sign is part
+	// of the row's meaning (a green addition must not read as a blank context line),
+	// so it has to be repainted rather than written once at creation.
+	const { plugin, node } = loadPlugin();
+	plugin.patchOverlayList(node.__list, [plugin.buildDiffView({
+		path: "/a/b.py", oldText: null, newText: "a\nb", streaming: true
+	})]);
+	const first = rowsOf(node);
+	check("首帧两行都是新增",
+		first.every((row) => row.className.includes("add") && row.children[1].textContent === "+"));
+
+	// Now a diff whose SECOND row is context. Position 1 must stop claiming to be
+	// an addition.
+	plugin.patchOverlayList(node.__list, [plugin.buildDiffView({
+		path: "/a/b.py", oldText: "a\nb", newText: "a\nc", streaming: true
+	})]);
+	const second = rowsOf(node);
+	const kinds = second.map((row) => row.className.replace("r ", ""));
+	const signs = second.map((row) => row.children[1].textContent);
+	check("种类与符号一一对应",
+		kinds.every((kind, index) => {
+			const expected = kind.startsWith("add") ? "+" : kind.startsWith("del") ? "-" : " ";
+			return signs[index] === expected;
+		}),
+		`kinds=${JSON.stringify(kinds)} signs=${JSON.stringify(signs)}`);
 });
 
 test("占位提示在有内容时移除、变空时回来", () => {
@@ -357,6 +494,27 @@ test("占位提示在有内容时移除、变空时回来", () => {
 	})]);
 	plugin.setPlaceholder(node.__list, null);
 	check("占位移除", !node.__list.children.some((child) => child.className === "empty"));
+});
+
+test("占位提示的换行渲染成 br 而不是被折叠", () => {
+	// The fake DOM does not collapse whitespace, so it cannot reproduce the bug
+	// this guards: assigning `"a\nb"` to `textContent` renders on ONE line in a
+	// real browser, because a newline in text content is collapsed like any other
+	// whitespace. Asserting the structure (an actual `<br>` element) is what makes
+	// this test meaningful — asserting the text would pass either way.
+	const { plugin, node } = loadPlugin();
+	plugin.setPlaceholder(node.__list, "No file edits yet.\nThe next edit will appear here.");
+	const placeholder = node.__list.children.find((child) => child.className === "empty");
+	check("占位存在", placeholder !== void 0);
+	const breaks = placeholder.children.filter((child) => child.tagName === "BR");
+	check("换行被渲染成 br 元素", breaks.length === 1, `got ${String(breaks.length)}`);
+
+	// And a single-line placeholder must not gain a stray break.
+	plugin.setPlaceholder(node.__list, "one line");
+	check("单行不产生 br", placeholder.children.filter((c) => c.tagName === "BR").length === 0);
+	// Reusing the element keeps its identity, but the text must actually change.
+	check("文本已更新", placeholder.textContent.includes("one line"), placeholder.textContent);
+	check("旧文本已清除", !placeholder.textContent.includes("No file edits yet."));
 });
 
 test("buildDiffView 产出正确的行模型", () => {
@@ -395,13 +553,21 @@ test("左边缘拖拽改变宽度（左拖变宽）", () => {
 	const { node } = loadPlugin();
 	const strip = stripOf(node);
 	check("存在拖拽把手", strip !== void 0);
-	// getBoundingClientRect is a fixed 400 in the shim, so the starting width is
-	// recorded from there; dragging left by 100 must widen by 100.
+	// The start width comes from the panel's own `style.width` (the shim's
+	// `getBoundingClientRect` is a fixed 400 and is deliberately NOT the source —
+	// in a real browser the rect is 0 for an element that is not yet in the
+	// document, and reading it there used to collapse the panel to its minimum on
+	// the first window resize). Assertions are therefore relative to the real start.
+	const start = Number.parseFloat(node.style.width);
+	check("起始宽度来自 style，不为 0", start > 0, node.style.width);
+
 	strip.dispatch("pointerdown", { clientX: 500, pointerId: 1 });
 	strip.dispatch("pointermove", { clientX: 400, pointerId: 1 });
-	check("左拖后变宽 100px", node.style.width === "500px", node.style.width);
+	check("左拖 100px 后变宽 100px",
+		node.style.width === `${String(Math.round(start + 100))}px`, node.style.width);
 	strip.dispatch("pointermove", { clientX: 600, pointerId: 1 });
-	check("右拖后变窄 100px", node.style.width === "300px", node.style.width);
+	check("右拖 100px 后变窄 100px",
+		node.style.width === `${String(Math.round(start - 100))}px`, node.style.width);
 });
 
 test("宽度被夹在最小值与视口之间", () => {
@@ -420,6 +586,7 @@ test("拖动期间显示宽度读数，松手后写入存储", () => {
 	const { dom, node } = loadPlugin();
 	const strip = stripOf(node);
 	const chip = node.__widthChip;
+	const start = Number.parseFloat(node.style.width);
 	check("初始隐藏", chip.style.display !== "inline");
 	strip.dispatch("pointerdown", { clientX: 500, pointerId: 1 });
 	check("拖动中显示", chip.style.display === "inline", chip.style.display);
@@ -428,9 +595,13 @@ test("拖动期间显示宽度读数，松手后写入存储", () => {
 	check("body 进入拖拽态", dom.body.classList.contains("dshld-resizing"));
 	strip.dispatch("pointerup", { clientX: 450, pointerId: 1 });
 	check("松手后隐藏", chip.style.display === "none", chip.style.display);
-	check("宽度已持久化", dom.store.get("dsh-live-diff:width") === "450",
+	// Dragging left by 50 widens by 50 from whatever the panel opened at.
+	check("宽度已持久化", dom.store.get("dsh-live-diff:width") === String(Math.round(start + 50)),
 		String(dom.store.get("dsh-live-diff:width")));
 	check("body 类已清理", dom.body.classList.contains("dshld-resizing") === false);
+	check("松手后撤销了 window 监听",
+		(dom.window.listeners.get("pointerup")?.size ?? 0) === 0,
+		`still ${String(dom.window.listeners.get("pointerup")?.size ?? 0)}`);
 });
 
 test("storedWidth 读回已保存的宽度并忽略坏值", () => {
@@ -445,6 +616,7 @@ test("storedWidth 读回已保存的宽度并忽略坏值", () => {
 
 test("storage 抛错不影响浮窗", () => {
 	const { dom, node, plugin } = loadPlugin();
+	const start = Number.parseFloat(node.style.width);
 	dom.window.localStorage.getItem = () => { throw new Error("SecurityError"); };
 	dom.window.localStorage.setItem = () => { throw new Error("SecurityError"); };
 	check("回退到默认宽度", plugin.storedWidth() === plugin.WIDTH_DEFAULT);
@@ -453,7 +625,7 @@ test("storage 抛错不影响浮窗", () => {
 	strip.dispatch("pointerdown", { clientX: 500, pointerId: 1 });
 	strip.dispatch("pointermove", { clientX: 450, pointerId: 1 });
 	strip.dispatch("pointerup", { clientX: 450, pointerId: 1 });
-	check("存不进去也不抛错", node.style.width === "450px", node.style.width);
+	check("存不进去也不抛错", node.style.width === `${String(Math.round(start + 50))}px`, node.style.width);
 });
 
 test("双击把手恢复默认宽度", () => {
@@ -464,6 +636,24 @@ test("双击把手恢复默认宽度", () => {
 	check("已被拖窄", node.style.width === `${String(plugin.WIDTH_MIN)}px`, node.style.width);
 	strip.dispatch("dblclick", {});
 	check("恢复默认", node.style.width === `${String(plugin.WIDTH_DEFAULT)}px`, node.style.width);
+});
+
+test("拖拽把手在 window 上的监听会被 disposer 移除", () => {
+	// A `window` listener outlives the panel element, so removing the element does
+	// not collect it. The live-reload path loads this plugin on every source
+	// change, so a leak here accumulates one stale handler (and its whole closure)
+	// per reload, all of them re-clamping a panel that no longer exists.
+	const { dom, node } = loadPlugin();
+	const resizeListeners = dom.window.listeners.get("resize");
+	check("已注册 resize 监听", resizeListeners !== void 0 && resizeListeners.size === 1,
+		`got ${String(resizeListeners?.size)}`);
+
+	check("创建时暴露了 disposer", typeof node.__detachResize === "function");
+	node.__detachResize();
+
+	const after = dom.window.listeners.get("resize");
+	check("disposer 移除了 resize 监听", after === void 0 || after.size === 0,
+		`still ${String(after?.size)}`);
 });
 
 // ──────────────────────────────── runner ────────────────────────────────────

@@ -8,7 +8,7 @@
  *
  * Run: node test/host.test.mjs
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventEmitter } from "node:events";
@@ -26,8 +26,16 @@ function fakeRequest(method, body, url) {
 	const req = new EventEmitter();
 	req.method = method;
 	req.url = url ?? "/live-diff-diag";
+	// The handler calls `destroy()` when the body exceeds its cap, so the stub needs
+	// it: without this the over-cap branch threw instead of being exercised, which
+	// is why that path had no coverage.
+	req.destroyed = false;
+	req.destroy = () => {
+		req.destroyed = true;
+	};
 	// Emit after the handler has attached its listeners.
 	setImmediate(() => {
+		if (req.destroyed) return;
 		if (body !== void 0) req.emit("data", Buffer.from(body, "utf8"));
 		req.emit("end");
 	});
@@ -117,6 +125,57 @@ await route.handler(fakeRequest("POST", "{not json"), bad);
 assert.equal(bad.status, 200, "a malformed body is still accepted");
 assert.equal(lines().length, 2, "the malformed body is kept");
 assert.ok("unparsed" in JSON.parse(lines()[1]), "a malformed body is recorded as unparsed");
+
+// A JSON scalar spreads to nothing; it must not masquerade as a real report.
+const scalar = fakeResponse();
+await route.handler(fakeRequest("POST", "42"), scalar);
+assert.ok("malformed" in JSON.parse(lines()[2]), "a scalar body is recorded as malformed");
+
+// The body must not be able to forge the timestamp.
+//
+// `at` is written after the spread precisely because `test/granularity.probe.mjs`
+// derives its delta-t from that field: a report carrying its own `at` produced
+// garbage intervals while looking like a legitimate line.
+const forged = fakeResponse();
+await route.handler(fakeRequest("POST", JSON.stringify({ at: "1999-01-01T00:00:00.000Z", reason: "forged" })), forged);
+const forgedRecord = JSON.parse(lines()[3]);
+assert.equal(forgedRecord.reason, "forged", "the report body still lands");
+assert.notEqual(forgedRecord.at, "1999-01-01T00:00:00.000Z", "a forged `at` does not survive");
+assert.ok(Date.now() - Date.parse(forgedRecord.at) < 60_000, "the timestamp is the host's own clock");
+
+// The log is capped by size, not only by age.
+//
+// The TTL compares against the file's mtime, and every append refreshes it — so a
+// session that reports continuously keeps the file "fresh" forever and the TTL
+// never fires. Before this cap the real log reached several MB.
+//
+// Each report is deliberately kept **under** `readBody`'s 64 KiB cap: an oversized
+// body is rejected before it reaches the recorder (asserted separately below), so
+// using one here would test the cap by accident.
+const pad = "x".repeat(48 * 1024);
+let truncated = false;
+let previousSize = statSync(logFile).size;
+for (let index = 0; index < 60; index += 1) {
+	const big = fakeResponse();
+	await route.handler(fakeRequest("POST", JSON.stringify({ reason: `bulk ${String(index)}`, pad })), big);
+	const size = statSync(logFile).size;
+	if (size < previousSize) truncated = true;
+	previousSize = size;
+}
+const cappedSize = statSync(logFile).size;
+// The host caps at 2 MiB; allow one oversized append plus slack, since the cap is
+// checked before the write.
+const LOG_CAP_BYTES = 2 * 1024 * 1024;
+assert.ok(truncated, "the size cap truncated the log at least once");
+assert.ok(cappedSize < LOG_CAP_BYTES * 1.2,
+	`log stayed near the cap (${String(cappedSize)} bytes)`);
+
+// A body over the cap is rejected explicitly, not recorded as an empty report.
+const oversized = fakeResponse();
+await route.handler(fakeRequest("POST", JSON.stringify({ reason: "huge", pad: "z".repeat(80 * 1024) })), oversized);
+const lastRecord = JSON.parse(lines().at(-1));
+assert.equal(lastRecord.rejected, "body exceeded the size cap",
+	"an over-cap body is recorded as rejected, not as an empty report");
 
 // A GET is the host's own report of the browser roster. This is the reading that
 // answers "is my client half in the boot graph?" without needing the GUI token.

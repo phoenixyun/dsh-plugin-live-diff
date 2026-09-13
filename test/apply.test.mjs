@@ -155,13 +155,62 @@ assert.ok(
 // sidebar pane has no definite height, so it resolves to zero; with `overflow:
 // auto` that clipped the entire panel while the component rendered perfectly and
 // beaconed faithfully. This bug was shipped twice — once as `height: 100%`, once
-// as `maxHeight: 100%` — and both times it was indistinguishable from "no data".
-// The guard is a source assertion because the failure lives in CSS, which the
-// render stubs cannot exercise.
-const rootLayoutUsesNoPercentHeight = !/height:\s*"(?:100%|\d+%)"/.test(source);
-assert.ok(rootLayoutUsesNoPercentHeight, "no percentage height in the view's layout");
-const rootLayoutClipsNothing = !/pageStyle[\s\S]{0,400}?overflow:\s*"auto"/.test(source);
-assert.ok(rootLayoutClipsNothing, "the root layout does not clip its own content");
+// as `maxHeight: 100%`.
+//
+// The guard reads the style objects rather than pattern-matching the source text.
+// The previous version was a regex, `/height:\s*"(?:100%|\d+%)"/`, and it was
+// verified to be blind to exactly the second shipped variant:
+//
+//   * `maxHeight: "100%"` — there is no lowercase `eight:` preceded by
+//     `height` for the pattern to match, so it passed.
+//   * `height: '100%'` — single quotes, so the `"` in the pattern failed.
+//   * Renaming the object (`pageStyle` -> anything) made the companion
+//     `overflow` guard match nothing at all, so a real self-clipping regression
+//     would have shipped green. (Verified by injecting each variant.)
+//
+// Reading the parsed object literals removes all three blind spots: key names and
+// string values are compared as data, independent of spacing, quote style, or the
+// variable the object is assigned to.
+
+/** Pull every `{ key: "value" }` pair out of every object literal in the bundle. */
+function styleEntries(text) {
+	const entries = [];
+	// Find object literals: a `{` that is followed by `key: value` pairs only.
+	for (const start of text.matchAll(/\{/g)) {
+		let depth = 0;
+		let end = -1;
+		for (let index = start.index; index < text.length; index += 1) {
+			const ch = text[index];
+			if (ch === "{") depth += 1;
+			else if (ch === "}") {
+				depth -= 1;
+				if (depth === 0) { end = index; break; }
+			}
+		}
+		if (end < 0) continue;
+		const body = text.slice(start.index + 1, end);
+		// Only look at shallow bodies (no nested braces) to keep this cheap, and
+		// skip bodies that contain JSX or function bodies.
+		if (body.includes("{") || body.includes("(") || body.includes("=>")) continue;
+		for (const pair of body.matchAll(/([A-Za-z_$][\w$]*)\s*:\s*(["'])([^"']*)\2/g)) {
+			entries.push({ key: pair[1], value: pair[3] });
+		}
+	}
+	return entries;
+}
+
+const stylePairs = styleEntries(source);
+assert.ok(stylePairs.length > 20, `style extraction found only ${String(stylePairs.length)} pairs — the guard would be vacuous`);
+
+const percentHeights = stylePairs.filter(
+	(pair) => /height/i.test(pair.key) && /%/.test(pair.value)
+);
+assert.equal(percentHeights.length, 0,
+	`percentage height in a style object (${JSON.stringify(percentHeights)}) — resolves to 0 inside a sidebar pane`);
+
+const selfClipping = stylePairs.filter((pair) => pair.key === "overflow" && pair.value === "auto");
+assert.equal(selfClipping.length, 0,
+	"`overflow: auto` in a style object — a zero-height box with this clips its own content");
 
 // And the colours must be stated rather than inherited, for the same reason: an
 // inherited colour on a white pane is white-on-white.
