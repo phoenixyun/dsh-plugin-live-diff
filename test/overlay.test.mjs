@@ -211,13 +211,27 @@ const here = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(join(here, "..", "lib", "client.js"), "utf8");
 
 const jsx = (type, props, children) => ({ type, props, children });
+/**
+ * Every ref object `useRef` has created, so a test can find the one a component
+ * attached and check WHICH element carries it. This is the only way to observe the
+ * defect this guards: a ref on the wrong element throws nothing and looks correct
+ * in the tree unless you inspect where it landed.
+ */
+const createdRefs = [];
 const reactStub = {
 	jsx,
 	Fragment: Symbol("Fragment"),
 	useEffect: () => {},
 	useCallback: (fn) => fn,
-	useRef: (value) => ({ current: value }),
+	useRef: (value) => {
+		const ref = { current: value };
+		createdRefs.push(ref);
+		return ref;
+	},
 	useMemo: (compute) => compute(),
+	// `DiffsView` calls `useState`; without it the plugin's bundle cannot even be
+	// materialized by this harness, which is part of why that view had no coverage.
+	useState: (value) => [value, () => {}],
 	useSyncExternalStore: () => null
 };
 const requireStub = (specifier) => {
@@ -515,6 +529,41 @@ test("占位提示的换行渲染成 br 而不是被折叠", () => {
 	// Reusing the element keeps its identity, but the text must actually change.
 	check("文本已更新", placeholder.textContent.includes("one line"), placeholder.textContent);
 	check("旧文本已清除", !placeholder.textContent.includes("No file edits yet."));
+});
+
+test("跟随滚动的 ref 落在真正可滚动的元素上", () => {
+	// `.dshld_body` is the element carrying `max-height` and `overflow` (injected via
+	// `ensureStyles`), so it is the only element that can scroll. The ref used to be
+	// a prop, and the sidebar view attached it to an outer wrapper that has no
+	// overflow: the pin then set `scrollTop` on a box that could not scroll, and the
+	// body that actually scrolls was never followed. Nothing threw — the diff just
+	// grew out of view — so this has to be asserted structurally.
+	const { plugin } = loadPlugin();
+	const diff = { path: "/a/b.py", oldText: null, newText: "a\nb", streaming: true };
+	createdRefs.length = 0;
+	const tree = plugin.DiffBodyScroller({ diff, children: null });
+
+	check("滚动容器带 dshld_body 类", tree.props.className === "dshld_body", tree.props.className);
+	check("滚动容器有 onScroll", typeof tree.props.onScroll === "function");
+	check("滚动容器带 ref", tree.props.ref !== void 0 && tree.props.ref !== null);
+	check("ref 来自 useRef（可被 React 挂上）",
+		createdRefs.includes(tree.props.ref), "ref 不是 useRef 创建的");
+
+	// The follow-scroll must not fire when the element is not mounted yet, and must
+	// not throw when the element is absent.
+	const handler = tree.props.onScroll;
+	tree.props.ref.current = null;
+	handler();
+	check("元素未挂载时 onScroll 不抛错", true);
+
+	// A body that is scrolled to the bottom counts as following; scrolled up does not.
+	const element = { scrollTop: 0, scrollHeight: 1000, clientHeight: 200 };
+	tree.props.ref.current = element;
+	element.scrollTop = 800;
+	handler();
+	element.scrollTop = 100;
+	handler();
+	check("滚动状态可被读取而不抛错", true);
 });
 
 test("buildDiffView 产出正确的行模型", () => {
