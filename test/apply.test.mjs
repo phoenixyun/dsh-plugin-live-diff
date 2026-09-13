@@ -167,7 +167,15 @@ assert.ok(rootLayoutClipsNothing, "the root layout does not clip its own content
 // inherited colour on a white pane is white-on-white.
 assert.ok(!/var\(--dsw-/.test(source), "no theme variables — a diagnostic must not be able to go invisible");
 
+// The plugin must not rename the host application's browser tab.
+//
+// It used to write its counters into `document.title`. That renamed the host's
+// own tab, and the reading was only visible while the tab was inactive — the one
+// moment nobody is watching a live diff. The diagnostics beacon is the evidence
+// channel; this guard keeps the title out of the code.
+assert.ok(!/document\.title\s*=/.test(source), "the plugin must not overwrite document.title");
+
 console.log("apply(): all assertions passed");
 console.log(`  sidebar tab type: kind=${tab.kind} id=${tab.id} priority=${tab.priority}`);
 console.log(`  slot injections: ${recorded.slotInjections.map((entry) => entry.slot).join(", ")}`);
-console.log("  layout guard: no percentage height, no self-clipping, no theme variables");
+console.log("  layout guard: no percentage height, no self-clipping, no theme variables, no title rewrite");
