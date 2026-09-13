@@ -154,7 +154,31 @@ function createElement(tag) {
 		}
 		return null;
 	};
-	element.getBoundingClientRect = () => ({ width: 400, height: 600, top: 0, left: 0, right: 400, bottom: 600 });
+	/**
+	 * A rect derived from the element's own style, so that position assertions mean
+	 * something.
+	 *
+	 * A fixed box made them vacuous: `anchorToTopLeft()` resolves the panel's live
+	 * position through this, so with a constant rect every resize looked anchored at
+	 * 0,0 and a panel that never moved could still pass. `left`/`top` are honoured when
+	 * set, and the missing pair is derived from the viewport exactly as the browser
+	 * does for the panel's default right/bottom anchoring. An element with no inline
+	 * position at all degrades to the old fixed box.
+	 */
+	element.getBoundingClientRect = () => {
+		/** The style length in px, or `null` when the property is unset. */
+		const px = (value) => {
+			const parsed = Number.parseFloat(value);
+			return Number.isFinite(parsed) ? parsed : null;
+		};
+		const width = px(element.style.width) ?? 400;
+		const height = px(element.style.height) ?? 600;
+		const right = px(element.style.right);
+		const bottom = px(element.style.bottom);
+		const left = px(element.style.left) ?? (right === null ? 0 : 1280 - right - width);
+		const top = px(element.style.top) ?? (bottom === null ? 0 : 768 - bottom - height);
+		return { width, height, left, top, right: left + width, bottom: top + height };
+	};
 	// Every element gets `classList`, not just `body`: the resize handle toggles
 	// its own `on` marker through it.
 	element.classList = {
@@ -766,6 +790,96 @@ test("四个角手柄各自的方向都正确", () => {
 			`${fresh.style.height}，期望 ${String(Math.round(wantHeight))}px`);
 		target.dispatch("pointerup", { clientX: 520, clientY: 520, pointerId: 1 });
 	}
+});
+
+test("拖某个角只动那个角和它的两条边，对角钉住", () => {
+	// The reported defect: the panel is laid out from its top-left corner, so a size
+	// change alone moved the bottom-right and left the dragged corner pinned. Dragging
+	// the top-left grip therefore moved the bottom-right, and the top-right grip moved
+	// the bottom-right too.
+	//
+	// The previous test only checked the SIGN of the size change, never the position,
+	// which is why this shipped: a panel that never moved satisfied it completely.
+	const corners = [
+		{ name: "rz-tl", widthSign: -1, heightSign: -1, movesLeft: true, movesTop: true },
+		{ name: "rz-tr", widthSign: 1, heightSign: -1, movesLeft: false, movesTop: true },
+		{ name: "rz-bl", widthSign: -1, heightSign: 1, movesLeft: true, movesTop: false },
+		{ name: "rz-br", widthSign: 1, heightSign: 1, movesLeft: false, movesTop: false }
+	];
+
+	for (const corner of corners) {
+		const { node } = loadPlugin();
+		// A known box, to the left of the viewport edge so no clamp interferes.
+		node.style.left = "500px";
+		node.style.top = "300px";
+		node.style.right = "";
+		node.style.bottom = "";
+		const start = node.getBoundingClientRect();
+		const grip = gripsOf(node).find((g) => g.className === `rz ${corner.name}`);
+		check(`${corner.name} 手柄存在`, grip !== void 0);
+
+		grip.dispatch("pointerdown", { clientX: 500, clientY: 300, pointerId: 1 });
+		grip.dispatch("pointermove", {
+			clientX: 500 + corner.widthSign * 60,
+			clientY: 300 + corner.heightSign * 60,
+			pointerId: 1
+		});
+		const end = node.getBoundingClientRect();
+
+		// The two edges this corner does NOT own have to stay exactly where they were.
+		if (corner.movesLeft) {
+			check(`${corner.name} 右边缘不动`, end.right === start.right,
+				`right ${String(start.right)} -> ${String(end.right)}`);
+		} else {
+			check(`${corner.name} 左边缘不动`, end.left === start.left,
+				`left ${String(start.left)} -> ${String(end.left)}`);
+		}
+		if (corner.movesTop) {
+			check(`${corner.name} 下边缘不动`, end.bottom === start.bottom,
+				`bottom ${String(start.bottom)} -> ${String(end.bottom)}`);
+		} else {
+			check(`${corner.name} 上边缘不动`, end.top === start.top,
+				`top ${String(start.top)} -> ${String(end.top)}`);
+		}
+
+		// And the grip under the pointer moves the way the pointer moved — otherwise the
+		// corner slides away from the cursor. A left-hand grip dragged leftwards (dx < 0)
+		// takes `left` down with it; a right-hand grip dragged rightwards raises `right`.
+		if (corner.movesLeft) {
+			check(`${corner.name} 左边缘跟着指针走`, end.left < start.left,
+				`left ${String(start.left)} -> ${String(end.left)}`);
+		} else {
+			check(`${corner.name} 右边缘跟着指针走`, end.right > start.right,
+				`right ${String(start.right)} -> ${String(end.right)}`);
+		}
+		grip.dispatch("pointerup", { clientX: 500, clientY: 300, pointerId: 1 });
+	}
+});
+
+test("角手柄拖到极限时，被拖的角仍贴着指针方向", () => {
+	// The size is clamped but the edge has to follow the clamped amount. Offsetting by
+	// the raw pointer delta instead would keep moving the panel after the size stopped
+	// changing, so the corner under the pointer slid away from it.
+	const { plugin, node } = loadPlugin();
+	node.style.left = "500px";
+	node.style.top = "300px";
+	node.style.right = "";
+	node.style.bottom = "";
+	const start = node.getBoundingClientRect();
+	const grip = gripsOf(node).find((g) => g.className === "rz rz-br");
+	check("右下角手柄存在", grip !== void 0);
+
+	grip.dispatch("pointerdown", { clientX: 500, clientY: 300, pointerId: 1 });
+	// Far past the width ceiling and the viewport height.
+	grip.dispatch("pointermove", { clientX: 4000, clientY: 4000, pointerId: 1 });
+	const end = node.getBoundingClientRect();
+
+	check("宽度停在 MAX_WIDTH 上",
+		Number.parseFloat(node.style.width) === plugin.maxWidth(), node.style.width);
+	check("左边缘没被拖走", end.left === start.left,
+		`left ${String(start.left)} -> ${String(end.left)}`);
+	check("上边缘没被拖走", end.top === start.top,
+		`top ${String(start.top)} -> ${String(end.top)}`);
 });
 
 test("角手柄的尺寸被夹在合法区间", () => {
