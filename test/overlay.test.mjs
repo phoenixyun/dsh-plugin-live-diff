@@ -127,10 +127,32 @@ function createElement(tag) {
 	};
 	element.setPointerCapture = () => {};
 	element.releasePointerCapture = () => {};
+	/**
+	 * Dispatch an event the way a browser does: fire on this element, then bubble up
+	 * through the ancestors, keeping `target` as the element it started on.
+	 *
+	 * The previous version called only this element's own listeners, which silently
+	 * made a test meaningless: pressing a button inside the header dispatched nothing
+	 * at all, because the drag listener lives on the header. The handler's "do not
+	 * start a drag from a control" guard was therefore never exercised — removing it
+	 * still passed the suite.
+	 */
 	element.dispatch = (type, event = {}) => {
-		for (const handler of element.listeners[type] ?? []) {
-			handler({ target: element, preventDefault() {}, ...event });
+		const payload = { target: element, preventDefault() {}, ...event };
+		let cursor = element;
+		while (cursor !== null && cursor !== void 0) {
+			for (const handler of cursor.listeners?.[type] ?? []) handler(payload);
+			cursor = cursor.parentNode;
 		}
+	};
+	/** Nearest ancestor (or self) matching the selector, as `Element.closest` does. */
+	element.closest = (selector) => {
+		let cursor = element;
+		while (cursor !== null && cursor !== void 0) {
+			if (selector === "button" && cursor.tagName === "BUTTON") return cursor;
+			cursor = cursor.parentNode;
+		}
+		return null;
 	};
 	element.getBoundingClientRect = () => ({ width: 400, height: 600, top: 0, left: 0, right: 400, bottom: 600 });
 	// Every element gets `classList`, not just `body`: the resize handle toggles
@@ -154,6 +176,10 @@ function installDom() {
 	const body = createElement("body");
 	const documentElement = createElement("html");
 	documentElement.clientWidth = 1280;
+	// A real viewport has both. Without `clientHeight` the panel falls back to its
+	// minimum height, which is correct behaviour but makes height assertions test the
+	// fallback instead of the fraction.
+	documentElement.clientHeight = 768;
 	const store = new Map();
 	const dom = {
 		body,
@@ -275,9 +301,20 @@ function headOf(node) {
 	return block === void 0 ? null : block.children[0];
 }
 
-/** The left-edge resize strip. */
+/** The corner resize grip. Its className is exactly `rz`. */
 function stripOf(node) {
 	return node.children.find((child) => child.className === "rz");
+}
+
+/** The header, which doubles as the move handle and hosts the buttons. */
+function barOf(node) {
+	return node.children.find((child) => child.className === "bar");
+}
+
+/** The bar's buttons, in DOM order: collapse, then hide. */
+function buttonsOf(node) {
+	const bar = barOf(node);
+	return bar === void 0 ? [] : bar.children.filter((child) => child.tagName === "BUTTON");
 }
 
 /** A minimal but complete diagnostics report, for the empty-state render. */
@@ -614,9 +651,25 @@ test("左边缘拖拽改变宽度（左拖变宽）", () => {
 	strip.dispatch("pointermove", { clientX: 400, pointerId: 1 });
 	check("左拖 100px 后变宽 100px",
 		node.style.width === `${String(Math.round(start + 100))}px`, node.style.width);
+	// A second move within the same drag: the delta is still measured from the press
+	// point, so the width must be start+dx, not lastWidth+dx.
 	strip.dispatch("pointermove", { clientX: 600, pointerId: 1 });
-	check("右拖 100px 后变窄 100px",
+	check("同一拖动内右拖 100px 后变窄 100px",
 		node.style.width === `${String(Math.round(start - 100))}px`, node.style.width);
+	strip.dispatch("pointerup", { clientX: 600, pointerId: 1 });
+
+	// A SECOND, separate drag. This is what pins the baseline capture: the first drag
+	// leaves the width at `start-100`, so a handler that measures from the previous
+	// width instead of re-capturing on pointerdown reads the wrong baseline here. The
+	// earlier single-drag version of this test could not tell the two apart, because
+	// the captured value and the starting value happened to be equal on the first
+	// press only.
+	const afterFirst = Number.parseFloat(node.style.width);
+	strip.dispatch("pointerdown", { clientX: 500, pointerId: 1 });
+	strip.dispatch("pointermove", { clientX: 450, pointerId: 1 });
+	check("第二次拖动左移 50px 后变宽 50px",
+		node.style.width === `${String(Math.round(afterFirst + 50))}px`,
+		`${String(node.style.width)}，第一次结束后是 ${String(afterFirst)}px`);
 });
 
 test("宽度被夹在最小值与视口之间", () => {
@@ -629,6 +682,105 @@ test("宽度被夹在最小值与视口之间", () => {
 	// Drag far left: would exceed the viewport without clamping.
 	strip.dispatch("pointermove", { clientX: -5000, pointerId: 1 });
 	check("不超过视口上限", node.style.width === `${String(plugin.maxWidth())}px`, node.style.width);
+});
+
+test("默认高度不是满视口（否则会盖住宿主控件）", () => {
+	// A full-height panel at `z-index: 2147483647` covered the host's own controls in
+	// the bottom-right corner; one of them could not be clicked at all.
+	const { plugin, node } = loadPlugin();
+	const height = Number.parseFloat(node.style.height);
+	check("高度是具体像素而不是 100vh", node.style.height.endsWith("px"), node.style.height);
+	check("高度小于视口", height < 768, `${String(height)} vs 768`);
+	check("高度不低于最小值", height >= plugin.HEIGHT_MIN, String(height));
+	check("高度约等于视口的固定比例",
+		Math.abs(height - 768 * plugin.HEIGHT_FRACTION) <= 1,
+		`${String(height)} vs ${String(768 * plugin.HEIGHT_FRACTION)}`);
+});
+
+test("拖动标题栏可移动面板，并切换到 left/top 定位", () => {
+	const { node } = loadPlugin();
+	const bar = barOf(node);
+	check("标题栏存在", bar !== void 0);
+	// Unset style properties read as "" in a browser and as undefined in the shim, so
+	// this checks falsiness rather than equality with the empty string.
+	check("默认用 right/bottom 定位",
+		Boolean(node.style.right) && !node.style.left,
+		`right=${String(node.style.right)} left=${String(node.style.left)}`);
+
+	// The shim's rect is a fixed box, so the anchor switch takes those numbers.
+	bar.dispatch("pointerdown", { clientX: 500, clientY: 400, pointerId: 1 });
+	bar.dispatch("pointermove", { clientX: 460, clientY: 380, pointerId: 1 });
+	check("拖动后改用 left/top", Boolean(node.style.left) && Boolean(node.style.top),
+		`left=${String(node.style.left)} top=${String(node.style.top)}`);
+	check("right/bottom 已清除", !node.style.right && !node.style.bottom,
+		`right=${String(node.style.right)} bottom=${String(node.style.bottom)}`);
+
+	// A drag is a move, not a resize: width and height must be untouched.
+	check("移动不改变宽度", node.style.width.endsWith("px"));
+	check("移动不改变高度", node.style.height.endsWith("px"));
+});
+
+test("角手柄同时改变宽度和高度", () => {
+	const { node } = loadPlugin();
+	const grip = stripOf(node);
+	check("存在角手柄", grip !== void 0, "没有 .rz 元素");
+	const startWidth = Number.parseFloat(node.style.width);
+	const startHeight = Number.parseFloat(node.style.height);
+
+	grip.dispatch("pointerdown", { clientX: 500, clientY: 500, pointerId: 1 });
+	// Dragging LEFT widens (the panel is right-anchored, so its left edge moves out)
+	// and dragging UP makes it taller (it is bottom-anchored).
+	grip.dispatch("pointermove", { clientX: 440, clientY: 440, pointerId: 1 });
+	check("左拖 60px 后变宽 60px",
+		node.style.width === `${String(Math.round(startWidth + 60))}px`, node.style.width);
+	check("上拖 60px 后变高 60px",
+		node.style.height === `${String(Math.round(startHeight + 60))}px`, node.style.height);
+
+	// Both are clamped, so the panel can never grow past the viewport.
+	grip.dispatch("pointermove", { clientX: -99999, clientY: -99999, pointerId: 1 });
+	const grownWidth = Number.parseFloat(node.style.width);
+	const grownHeight = Number.parseFloat(node.style.height);
+	check("宽度不超过上限", grownWidth <= 1256, String(grownWidth));
+	check("高度不超过视口", grownHeight <= 768, String(grownHeight));
+	check("高度不低于最小值", grownHeight >= 180, String(grownHeight));
+});
+
+test("拖拽不会吃掉标题栏按钮的点击", () => {
+	// The move handle is the header, and the header contains the buttons. A press on a
+	// button used to start a drag, which called `preventDefault()` and suppressed the
+	// button's click — the hide button stopped working entirely.
+	const { node } = loadPlugin();
+	const bar = barOf(node);
+	const buttons = buttonsOf(node);
+	check("标题栏有两个按钮", buttons.length === 2, `got ${String(buttons.length)}`);
+	const [collapse, hide] = buttons;
+
+	// A press whose target is a button must not start a drag.
+	hide.dispatch("pointerdown", { clientX: 500, clientY: 400, pointerId: 1 });
+	check("按下按钮不进入拖拽态", !bar.classList.contains("on"));
+	check("按下按钮不加 body 拖拽态", !node.ownerDocument?.body?.classList?.contains("dshld-resizing"));
+
+	// And the handlers still do their job.
+	check("隐藏按钮有 onclick", typeof hide.onclick === "function");
+	const list = node.__list;
+	hide.onclick();
+	check("点击隐藏后面板不可见", node.style.display === "none", node.style.display);
+
+	check("折叠按钮有 onclick", typeof collapse.onclick === "function");
+	collapse.onclick();
+	check("点击折叠后列表隐藏", list.style.display === "none", list.style.display);
+	check("折叠标记已记录", node.__list !== void 0);
+});
+
+test("移动后位置会写入存储", () => {
+	const { dom, node } = loadPlugin();
+	const bar = barOf(node);
+	bar.dispatch("pointerdown", { clientX: 500, clientY: 400, pointerId: 1 });
+	bar.dispatch("pointermove", { clientX: 440, clientY: 360, pointerId: 1 });
+	bar.dispatch("pointerup", { clientX: 440, clientY: 360, pointerId: 1 });
+	check("left 已持久化", dom.store.has("dsh-live-diff:left"),
+		`keys=${[...dom.store.keys()].join(",")}`);
+	check("top 已持久化", dom.store.has("dsh-live-diff:top"));
 });
 
 test("拖动期间显示宽度读数，松手后写入存储", () => {

@@ -1,0 +1,17 @@
+# Pin the line endings of the source files.
+#
+# This repository stores LF. Without a rule, an editor or a script that writes in
+# text mode on Windows silently converts a file to CRLF, and because the stored blob
+# is LF every single line then shows as changed — a 500-line edit appeared as a
+# 3000-line diff. That happened twice while developing the overlay, and both times it
+# cost a debugging round to notice the diff was almost entirely noise.
+#
+# `eol=lf` in the index and the working tree makes the conversion impossible.
+* text=auto eol=lf
+
+# Binary files must not be touched.
+*.vsix binary
+*.png binary
+*.jpg binary
+*.ico binary
+*.zst binary
