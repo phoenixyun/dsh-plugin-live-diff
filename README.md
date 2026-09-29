@@ -16,6 +16,11 @@ at once when the tool call settles.
 └─────────────────────────────────────────────────┘
 ```
 
+## Demo
+
+[A 26-second demo on Bilibili — "deepseek v4.1 flash 太强大了 50元手搓文件变更实时预览"](https://www.bilibili.com/video/BV1N6YB6KESy/)\
+*Live Diffs for DSH — 边写边看的编辑过程*
+
 ## The problem
 
 DSH already ships a diff card, and it already accumulates the streaming data — the
