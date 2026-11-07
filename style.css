@@ -1,4 +1,4 @@
-﻿/* ============================================================================
+/* ============================================================================
  * live-diff window backdrop
  *
  * Served by the host half at /live-diff-style.css and re-fetched by the browser
@@ -234,15 +234,13 @@ html[data-dshld-backdrop="on"] [class*="_composerFade"] {
   background-image: none !important;
 }
 
-/* --- 5. pseudo-element bands --------------------------------------------- */
+/* --- 5. titlebar --------------------------------------------------------- */
 
-/* The shell paints its custom titlebar as a 40px ::before band on the layout
- * frame (`inset: 0 0 <rest>` with a solid surface colour). Pseudo-elements are
- * invisible to the element scan, so this stayed as a white strip across the top
- * of the window after every real surface had been glassed. */
-html[data-dshld-backdrop="on"] [class*="_frame"]::before {
-  background: transparent !important;
-}
+/* Deliberately NOT overridden. The 40px band above the app is painted by the
+ * layout frame's ::before with the window's own surface colour; clearing it
+ * turned the titlebar into a black strip, which reads as broken chrome rather
+ * than as part of the effect. It keeps the shell's colour, and the menu/menu
+ * buttons stay on their normal contrast. */
 
 /* --- 6. white foregrounds ------------------------------------------------ */
 
