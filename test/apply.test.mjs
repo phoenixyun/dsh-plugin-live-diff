@@ -138,12 +138,17 @@ const titleRegistration = recorded.slotRegistrations.find((entry) => entry.slot 
 assert.equal(titleRegistration.entry.key, tab.id, "the title seat is keyed by the same id");
 
 // Effects own every long-lived registration, so disposal is wired up. There are
-// exactly two: the always-on overlay panel and the sidebar tab type. The overlay
-// is the one that must be owned here — it outlives any opened tab.
-assert.equal(recorded.effects.length, 2, "both the overlay and the tab type are owned by effects");
+// exactly three: the always-on overlay panel, the window backdrop (the same
+// stream painted behind the app), and the sidebar tab type. The overlay and the
+// backdrop are the ones that must be owned here — both outlive any opened tab.
+assert.equal(recorded.effects.length, 3, "overlay, window backdrop and tab type are all owned by effects");
 assert.ok(
 	recorded.effects.includes("live-diff: overlay panel"),
 	"the overlay starts from apply(), so it exists with no tab open"
+);
+assert.ok(
+	recorded.effects.includes("live-diff: window backdrop"),
+	"the window backdrop starts from apply(), so the shell glass exists with no tab open"
 );
 assert.ok(
 	recorded.effects.includes("live-diff: sidebar tab type"),

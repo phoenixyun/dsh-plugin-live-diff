@@ -8,7 +8,7 @@
  *
  * Run: node test/host.test.mjs
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventEmitter } from "node:events";
@@ -18,6 +18,13 @@ import assert from "node:assert/strict";
 const scratch = mkdtempSync(join(tmpdir(), "live-diff-host-"));
 const logFile = join(scratch, "diag.log");
 process.env.DSH_LIVE_DIFF_LOG = logFile;
+
+// The stylesheet is served from disk, so point the host half at a scratch copy:
+// this exercises the real read path without depending on the package layout.
+const styleFile = join(scratch, "style.css");
+const styleText = "/* test stylesheet */\n#root{background:rgba(0,0,0,0)}\n";
+writeFileSync(styleFile, styleText, "utf8");
+process.env.DSH_LIVE_DIFF_STYLE = styleFile;
 
 const host = await import("../lib/index.js");
 
@@ -55,17 +62,18 @@ function fakeResponse() {
 	return res;
 }
 
-/** Capture the route the plugin registers. */
-let route;
+/** Capture the routes the plugin registers, and the labels its effects carry. */
+const routes = [];
+const effectLabels = [];
 const ctx = {
 	effect: (fn, label) => {
-		assert.equal(label, "live-diff: diagnostic route", "the effect is labelled");
+		effectLabels.push(label);
 		fn();
 		return () => {};
 	},
 	webServer: {
 		register: (value) => {
-			route = value;
+			routes.push(value);
 			return () => {};
 		}
 	},
@@ -87,7 +95,17 @@ const ctx = {
 assert.deepEqual(host.inject, ["webServer", "clientModules"], "the host half declares the services it reads, statically");
 host.apply(ctx);
 
-assert.ok(route !== void 0, "apply() registers a route");
+// Two routes: the diagnostic beacon the browser posts to, and the stylesheet the
+// backdrop half re-fetches. Both are owned by labelled effects so disposal is wired.
+assert.deepEqual(
+	effectLabels,
+	["live-diff: diagnostic route", "live-diff: backdrop stylesheet route"],
+	"each route is registered inside a labelled effect"
+);
+const route = routes.find((value) => value.path === host.DIAG_PATH);
+const styleRoute = routes.find((value) => value.path === host.STYLE_PATH);
+assert.ok(route !== void 0, "apply() registers the diagnostic route");
+assert.ok(styleRoute !== void 0, "apply() registers the stylesheet route");
 assert.equal(route.kind, "prefix", "a prefix route, so any sub-path reaches the handler");
 assert.equal(route.path, host.DIAG_PATH, "the path is the exported constant the browser half mirrors");
 assert.equal(route.path, "/live-diff-diag", "the path stays distinct from every shipped route");
@@ -202,6 +220,38 @@ const wrongMethod = fakeResponse();
 await route.handler(fakeRequest("DELETE"), wrongMethod);
 assert.equal(wrongMethod.status, 405, "another method is refused");
 assert.match(wrongMethod.body, /GET or POST only/, "the refusal says why");
+
+// ── the stylesheet route ────────────────────────────────────────────────────
+// The backdrop is tuned by editing the served file, so the route has to hand back
+// the current bytes with no caching — that is what makes the look live-editable.
+assert.equal(styleRoute.kind, "prefix", "the stylesheet route is a prefix route");
+assert.equal(styleRoute.path, "/live-diff-style.css", "the path is the exported constant the browser half mirrors");
+
+const styleGet = fakeResponse();
+styleRoute.handler(fakeRequest("GET", void 0, "/live-diff-style.css"), styleGet);
+assert.equal(styleGet.status, 200, "the stylesheet is served");
+assert.match(styleGet.headers["content-type"], /text\/css/, "the reply is CSS");
+assert.equal(styleGet.headers["cache-control"], "no-store", "the reply is never cached");
+assert.equal(styleGet.body, styleText, "the served bytes are the file on disk");
+
+const styleHead = fakeResponse();
+styleRoute.handler(fakeRequest("HEAD", void 0, "/live-diff-style.css"), styleHead);
+assert.equal(styleHead.status, 200, "a HEAD is answered");
+assert.equal(styleHead.body, "", "a HEAD carries no body");
+
+const stylePost = fakeResponse();
+styleRoute.handler(fakeRequest("POST", "x", "/live-diff-style.css"), stylePost);
+assert.equal(stylePost.status, 405, "a write attempt is refused");
+assert.match(stylePost.body, /GET or HEAD only/, "the refusal says why");
+
+// A missing file is reported, not served as an empty 200: an empty stylesheet
+// would silently strip the whole effect and look like a plugin bug.
+process.env.DSH_LIVE_DIFF_STYLE = join(scratch, "missing.css");
+const styleMissing = fakeResponse();
+styleRoute.handler(fakeRequest("GET", void 0, "/live-diff-style.css"), styleMissing);
+assert.equal(styleMissing.status, 404, "a missing stylesheet is a 404");
+assert.match(styleMissing.body, /no stylesheet at/, "the 404 names the path it looked for");
+process.env.DSH_LIVE_DIFF_STYLE = styleFile;
 
 rmSync(scratch, { recursive: true, force: true });
 
