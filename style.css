@@ -1,0 +1,218 @@
+/* ============================================================================
+ * live-diff window backdrop
+ *
+ * Served by the host half at /live-diff-style.css and re-fetched by the browser
+ * every 1.5 s, so this file is the tuning surface: edit it, and a running DSH
+ * picks the change up within about 1.5 s - no restart, no reload.
+ *
+ * The browser half measures the shell and tags surfaces with
+ *   [data-dshld-glass="big|mid|small|inner"]  -> frosted white
+ *   [data-dshld-clear]                        -> fully transparent
+ * so nothing here names a CSS-module class. Tune the four glass bands below.
+ *
+ * KILL SWITCH: put the word dshld-off inside a CSS comment anywhere in this
+ * file and the browser half reverts the whole effect to the stock UI within
+ * ~1.5 s. Delete that comment to bring it back.
+ * ========================================================================== */
+
+:root {
+  --dshld-tint: 247, 249, 252;
+
+  /* Opacity and blur per band. Lower alpha + lower blur = more code visible,
+   * less UI contrast. The chat body is "big"; the sidebar/right panel "mid";
+   * cards inside them "small"; opaque surfaces nested under a glassed one
+   * "inner" (they stack, so they stay light). */
+  --dshld-big-a: 0.34;
+  --dshld-big-blur: 2px;
+  --dshld-mid-a: 0.34;
+  --dshld-mid-blur: 4px;
+  --dshld-small-a: 0.44;
+  --dshld-small-blur: 8px;
+  --dshld-inner-a: 0.12;
+  --dshld-inner-blur: 1px;
+
+  --dshld-code-opacity: 0.95;
+  --dshld-code-size: 19px;
+  --dshld-veil-opacity: 0.5;
+
+  --dshld-saturate: 135%;
+}
+
+/* --- 1. let the backdrop through ------------------------------------------ */
+
+html[data-dshld-backdrop="on"],
+html[data-dshld-backdrop="on"] body {
+  background: transparent !important;
+}
+
+/* The app's scrolling root, lifted above the fixed diff layer. */
+html[data-dshld-backdrop="on"] #root {
+  position: relative;
+  z-index: 1;
+  background: transparent !important;
+}
+
+/* The old floating panel would sit in the corner of the glass, unreadable. */
+html[data-dshld-backdrop="on"] #dsh-live-diff-overlay {
+  display: none !important;
+}
+
+/* --- 2. the diff layer ---------------------------------------------------- */
+
+#dsh-live-diff-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  background: radial-gradient(140% 120% at 50% 0%, #141b25 0%, #0b1017 58%, #05070a 100%);
+  color: #c9d1d9;
+}
+
+#dsh-live-diff-backdrop .dshld_bd_stack {
+  position: absolute;
+  inset: -8% 0 0;
+  padding: 0 3.5vw;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 34px;
+  font-family: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: var(--dshld-code-size, 19px);
+  line-height: 1.52;
+  font-weight: 450;
+  opacity: var(--dshld-code-opacity, 0.95);
+}
+
+/* The dimmed repeat that fills the upper part of the window. */
+#dsh-live-diff-backdrop .dshld_bd_echo {
+  opacity: 0.32;
+  filter: blur(0.4px);
+}
+
+#dsh-live-diff-backdrop .dshld_bd_entry {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+#dsh-live-diff-backdrop .dshld_bd_head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 0 7px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(200, 215, 235, 0.45);
+}
+
+#dsh-live-diff-backdrop .dshld_bd_path { color: rgba(214, 226, 240, 0.72); }
+#dsh-live-diff-backdrop .dshld_bd_head .add { color: #57d38a; }
+#dsh-live-diff-backdrop .dshld_bd_head .del { color: #ff7b72; }
+
+#dsh-live-diff-backdrop .dshld_bd_row {
+  display: flex;
+  gap: 14px;
+  padding: 0 8px;
+  border-radius: 3px;
+}
+
+#dsh-live-diff-backdrop .dshld_bd_no {
+  flex: none;
+  width: 1.1em;
+  text-align: right;
+  color: rgba(160, 180, 200, 0.24);
+  user-select: none;
+}
+
+#dsh-live-diff-backdrop .dshld_bd_tx {
+  flex: 1;
+  white-space: pre;
+  overflow: hidden;
+}
+
+#dsh-live-diff-backdrop .dshld_bd_row.add { background: rgba(63, 185, 80, 0.11); color: #b6ebc2; }
+#dsh-live-diff-backdrop .dshld_bd_row.rm { background: rgba(248, 81, 73, 0.1); color: #f6b8b3; }
+#dsh-live-diff-backdrop .dshld_bd_row.ctx { color: rgba(180, 198, 218, 0.46); }
+
+#dsh-live-diff-backdrop .dshld_bd_entry.is-live .dshld_bd_row.add:last-child {
+  animation: dshld_bd_glow 0.6s ease-out;
+}
+
+@keyframes dshld_bd_glow {
+  from { background: rgba(96, 226, 148, 0.34); }
+  to { background: rgba(63, 185, 80, 0.11); }
+}
+
+/* Light dimming only: the glass rules already sit on top of this. */
+#dsh-live-diff-backdrop .dshld_bd_veil {
+  position: absolute;
+  inset: 0;
+  opacity: var(--dshld-veil-opacity, 0.5);
+  background: linear-gradient(
+    180deg,
+    rgba(6, 9, 13, 0.28) 0%,
+    rgba(6, 9, 13, 0.06) 26%,
+    rgba(6, 9, 13, 0.06) 72%,
+    rgba(6, 9, 13, 0.4) 100%
+  );
+}
+
+#dsh-live-diff-backdrop .dshld_bd_idle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 10px;
+  color: rgba(150, 175, 200, 0.16);
+  letter-spacing: 0.55em;
+  font-size: 30px;
+}
+
+#dsh-live-diff-backdrop .dshld_bd_idle span {
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  color: rgba(150, 175, 200, 0.12);
+}
+
+/* --- 3. glass surgery ----------------------------------------------------- */
+
+html[data-dshld-backdrop="on"] [data-dshld-clear] {
+  background: transparent !important;
+  background-image: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html[data-dshld-backdrop="on"] [data-dshld-glass] {
+  background-image: none !important;
+}
+
+html[data-dshld-backdrop="on"] [data-dshld-glass="big"] {
+  background: rgba(var(--dshld-tint), var(--dshld-big-a)) !important;
+  -webkit-backdrop-filter: blur(var(--dshld-big-blur)) saturate(var(--dshld-saturate)) !important;
+  backdrop-filter: blur(var(--dshld-big-blur)) saturate(var(--dshld-saturate)) !important;
+}
+
+html[data-dshld-backdrop="on"] [data-dshld-glass="mid"] {
+  background: rgba(var(--dshld-tint), var(--dshld-mid-a)) !important;
+  -webkit-backdrop-filter: blur(var(--dshld-mid-blur)) saturate(var(--dshld-saturate)) !important;
+  backdrop-filter: blur(var(--dshld-mid-blur)) saturate(var(--dshld-saturate)) !important;
+}
+
+html[data-dshld-backdrop="on"] [data-dshld-glass="small"] {
+  background: rgba(var(--dshld-tint), var(--dshld-small-a)) !important;
+  -webkit-backdrop-filter: blur(var(--dshld-small-blur)) saturate(var(--dshld-saturate)) !important;
+  backdrop-filter: blur(var(--dshld-small-blur)) saturate(var(--dshld-saturate)) !important;
+}
+
+/* A surface nested inside a glassed one: it would otherwise cover the glass of
+ * its ancestor with opaque paint. Light on purpose - the parent already
+ * contributes most of the white. */
+html[data-dshld-backdrop="on"] [data-dshld-glass="inner"] {
+  background: rgba(var(--dshld-tint), var(--dshld-inner-a)) !important;
+  -webkit-backdrop-filter: blur(var(--dshld-inner-blur)) saturate(var(--dshld-saturate)) !important;
+  backdrop-filter: blur(var(--dshld-inner-blur)) saturate(var(--dshld-saturate)) !important;
+}
