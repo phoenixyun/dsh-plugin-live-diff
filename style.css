@@ -22,18 +22,19 @@
    * less UI contrast. The chat body is "big"; the sidebar/right panel "mid";
    * cards inside them "small"; opaque surfaces nested under a glassed one
    * "inner" (they stack, so they stay light). */
-  --dshld-big-a: 0.2;
-  --dshld-big-blur: 2px;
-  --dshld-mid-a: 0.2;
-  --dshld-mid-blur: 2px;
-  --dshld-small-a: 0.2;
-  --dshld-small-blur: 2px;
-  --dshld-inner-a: 0.07;
+  --dshld-big-a: 0.36;
+  --dshld-big-blur: 12px;
+  --dshld-mid-a: 0.36;
+  --dshld-mid-blur: 12px;
+  --dshld-small-a: 0.36;
+  --dshld-small-blur: 12px;
+  --dshld-inner-a: 0.13;
   --dshld-inner-blur: 1px;
 
   --dshld-code-opacity: 0.95;
   --dshld-code-size: 19px;
-  --dshld-veil-opacity: 0.45;
+  --dshld-veil-opacity: 0.3;
+  --dshld-sheen: 0.55;
 
   --dshld-saturate: 135%;
 }
@@ -251,6 +252,49 @@ html[data-dshld-backdrop="on"][data-dshld-white-text="on"] #root * {
   color: #f3f7fb !important;
 }
 
+/* White text over a light tint is unreadable; the glass goes smoked instead.
+ * One variable switch keeps both looks coherent, and the refracted code behind
+ * then reads as bright streaks inside dark glass rather than grey-on-grey. */
+html[data-dshld-backdrop="on"][data-dshld-white-text="on"] {
+  --dshld-tint: 18, 24, 34;
+}
+
 html[data-dshld-backdrop="on"][data-dshld-white-text="on"] #root *::placeholder {
   color: rgba(243, 247, 251, 0.5) !important;
 }
+
+/* --- 7. liquid glass ----------------------------------------------------- */
+
+/* The "liquid" half: one screen-blended layer over the whole window whose
+ * highlight follows the pointer (--dshld-mx / --dshld-my are written by the
+ * browser half on each animation frame). Reads as a light source moving across
+ * the glass rather than a printed gradient. */
+#dshld-lg-sheen {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  opacity: var(--dshld-sheen, 0.55);
+  background:
+    radial-gradient(520px circle at var(--dshld-mx, 50%) var(--dshld-my, 0%), rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0) 62%),
+    radial-gradient(900px circle at calc(var(--dshld-mx, 50%) + 220px) calc(var(--dshld-my, 0%) + 160px), rgba(140, 190, 255, 0.10), rgba(255, 255, 255, 0) 72%),
+    linear-gradient(118deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 34%, rgba(255, 255, 255, 0) 66%, rgba(255, 255, 255, 0.05));
+}
+
+/* The refraction half. Chromium (and therefore Electron) is the only engine that
+ * accepts an SVG filter inside backdrop-filter; the filter itself holds the blur,
+ * the displacement map and the edge lensing. Big and mid surfaces only: the
+ * filter rebuilds a displacement field per element and is the expensive part. */
+html[data-dshld-backdrop="on"][data-dshld-liquid="on"] [data-dshld-glass="big"],
+html[data-dshld-backdrop="on"][data-dshld-liquid="on"] [data-dshld-glass="mid"] {
+  -webkit-backdrop-filter: url(#dshld-lg-lens) saturate(175%) brightness(1.06) !important;
+  backdrop-filter: url(#dshld-lg-lens) saturate(175%) brightness(1.06) !important;
+  border-radius: 26px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.1),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+    0 16px 44px rgba(0, 0, 0, 0.26) !important;
+}
+
