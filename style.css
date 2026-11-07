@@ -1,4 +1,4 @@
-/* ============================================================================
+﻿/* ============================================================================
  * live-diff window backdrop
  *
  * Served by the host half at /live-diff-style.css and re-fetched by the browser
@@ -277,8 +277,8 @@ html[data-dshld-backdrop="on"][data-dshld-white-text="on"] #root *::placeholder 
   mix-blend-mode: screen;
   opacity: var(--dshld-sheen, 0.55);
   background:
-    radial-gradient(520px circle at var(--dshld-mx, 50%) var(--dshld-my, 0%), rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0) 62%),
-    radial-gradient(900px circle at calc(var(--dshld-mx, 50%) + 220px) calc(var(--dshld-my, 0%) + 160px), rgba(140, 190, 255, 0.10), rgba(255, 255, 255, 0) 72%),
+    radial-gradient(var(--dshld-sheen-size, 260px) circle at var(--dshld-mx, 50%) var(--dshld-my, 0%), rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0) 62%),
+    radial-gradient(calc(var(--dshld-sheen-size, 260px) * 1.8) circle at calc(var(--dshld-mx, 50%) + 220px) calc(var(--dshld-my, 0%) + 160px), rgba(140, 190, 255, 0.10), rgba(255, 255, 255, 0) 72%),
     linear-gradient(118deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 34%, rgba(255, 255, 255, 0) 66%, rgba(255, 255, 255, 0.05));
 }
 
