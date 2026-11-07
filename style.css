@@ -22,18 +22,18 @@
    * less UI contrast. The chat body is "big"; the sidebar/right panel "mid";
    * cards inside them "small"; opaque surfaces nested under a glassed one
    * "inner" (they stack, so they stay light). */
-  --dshld-big-a: 0.34;
+  --dshld-big-a: 0.2;
   --dshld-big-blur: 2px;
-  --dshld-mid-a: 0.34;
-  --dshld-mid-blur: 4px;
-  --dshld-small-a: 0.44;
-  --dshld-small-blur: 8px;
-  --dshld-inner-a: 0.12;
+  --dshld-mid-a: 0.2;
+  --dshld-mid-blur: 2px;
+  --dshld-small-a: 0.2;
+  --dshld-small-blur: 2px;
+  --dshld-inner-a: 0.07;
   --dshld-inner-blur: 1px;
 
   --dshld-code-opacity: 0.95;
   --dshld-code-size: 19px;
-  --dshld-veil-opacity: 0.5;
+  --dshld-veil-opacity: 0.45;
 
   --dshld-saturate: 135%;
 }
@@ -238,4 +238,19 @@ html[data-dshld-backdrop="on"] [class*="_composerFade"] {
  * of the window after every real surface had been glassed. */
 html[data-dshld-backdrop="on"] [class*="_frame"]::before {
   background: transparent !important;
+}
+
+/* --- 6. white foregrounds ------------------------------------------------ */
+
+/* The shell is authored for a light surface: body text is near-black and muted
+ * text is a mid grey. Over dark, semi-transparent glass that reads as
+ * grey-on-grey, so every foreground is lifted to white. Toggleable, because with
+ * a nearly opaque panel the original palette is still the better one. */
+html[data-dshld-backdrop="on"][data-dshld-white-text="on"] #root,
+html[data-dshld-backdrop="on"][data-dshld-white-text="on"] #root * {
+  color: #f3f7fb !important;
+}
+
+html[data-dshld-backdrop="on"][data-dshld-white-text="on"] #root *::placeholder {
+  color: rgba(243, 247, 251, 0.5) !important;
 }
