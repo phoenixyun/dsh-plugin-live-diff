@@ -66,7 +66,10 @@ html[data-dshld-backdrop="on"] #dsh-live-diff-overlay {
   z-index: 0;
   pointer-events: none;
   overflow: hidden;
-  background: radial-gradient(140% 120% at 50% 0%, #141b25 0%, #0b1017 58%, #05070a 100%);
+  /* Neutral charcoal. The first version was a blue-grey (#141b25) and every
+   * mostly-transparent region — the window gutters, the top strip — read as a
+   * blue tint rather than as darkness. */
+  background: radial-gradient(140% 120% at 50% 0%, #17181b 0%, #0d0e10 58%, #050506 100%);
   color: #c9d1d9;
 }
 
@@ -254,9 +257,11 @@ html[data-dshld-backdrop="on"][data-dshld-white-text="on"] #root * {
 
 /* White text over a light tint is unreadable; the glass goes smoked instead.
  * One variable switch keeps both looks coherent, and the refracted code behind
- * then reads as bright streaks inside dark glass rather than grey-on-grey. */
+ * then reads as bright streaks inside dark glass rather than grey-on-grey.
+ * Neutral grey, not blue: the tint multiplies with the backdrop, so a blue tint
+ * on a blue backdrop doubled up into a visible colour cast. */
 html[data-dshld-backdrop="on"][data-dshld-white-text="on"] {
-  --dshld-tint: 18, 24, 34;
+  --dshld-tint: 23, 23, 26;
 }
 
 html[data-dshld-backdrop="on"][data-dshld-white-text="on"] #root *::placeholder {
@@ -278,7 +283,7 @@ html[data-dshld-backdrop="on"][data-dshld-white-text="on"] #root *::placeholder 
   opacity: var(--dshld-sheen, 0.55);
   background:
     radial-gradient(var(--dshld-sheen-size, 260px) circle at var(--dshld-mx, 50%) var(--dshld-my, 0%), rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0) 62%),
-    radial-gradient(calc(var(--dshld-sheen-size, 260px) * 1.8) circle at calc(var(--dshld-mx, 50%) + 220px) calc(var(--dshld-my, 0%) + 160px), rgba(140, 190, 255, 0.10), rgba(255, 255, 255, 0) 72%),
+    radial-gradient(calc(var(--dshld-sheen-size, 260px) * 1.8) circle at calc(var(--dshld-mx, 50%) + 220px) calc(var(--dshld-my, 0%) + 160px), rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0) 72%),
     linear-gradient(118deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 34%, rgba(255, 255, 255, 0) 66%, rgba(255, 255, 255, 0.05));
 }
 
@@ -288,8 +293,8 @@ html[data-dshld-backdrop="on"][data-dshld-white-text="on"] #root *::placeholder 
  * filter rebuilds a displacement field per element and is the expensive part. */
 html[data-dshld-backdrop="on"][data-dshld-liquid="on"] [data-dshld-glass="big"],
 html[data-dshld-backdrop="on"][data-dshld-liquid="on"] [data-dshld-glass="mid"] {
-  -webkit-backdrop-filter: url(#dshld-lg-lens) saturate(175%) brightness(1.06) !important;
-  backdrop-filter: url(#dshld-lg-lens) saturate(175%) brightness(1.06) !important;
+  -webkit-backdrop-filter: url(#dshld-lg-lens) saturate(135%) brightness(1.05) !important;
+  backdrop-filter: url(#dshld-lg-lens) saturate(135%) brightness(1.05) !important;
   border-radius: 26px;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.55),
