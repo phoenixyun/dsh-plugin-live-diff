@@ -97,6 +97,29 @@ A round button at the bottom-right corner opens a 264 px panel with **9 sliders 
 Values persist in `localStorage` (`dshld.tuner.v2`); the panel's reset button puts
 every control back to its default.
 
+### Windows titlebar chrome
+
+On the Windows desktop app the native caption row reserves 40 px above every
+column, while the session header below it repeats a title row plus a view row.
+When the preload marks the window with `data-windows-titlebar`, the plugin lifts
+the **whole session header** into that reserved band as one fixed row: the
+breadcrumb title, the header action chips (agent team, creation mode, subagent
+and background-task counters) and the view tabs (`对话 / 轨迹 / 上下文 / 编队`)
+all sit in the titlebar beside the native controls.
+
+- The row starts after the sidebar (`--dsh-windows-sidebar-width`, with a 176 px
+  floor when the sidebar is collapsed) so the native App/Edit menus, sidebar
+  toggle and New Session control stay clear.
+- It stops 148 px short of the right edge, where the native minimise/maximise/
+  close buttons live.
+- The band's blank runs still drag the window; every control inside is
+  `no-drag`, so buttons keep their clicks.
+- Fullscreen drops back to the stock header (the band is gone there), and
+  ordinary browser documents never see this rule.
+
+It is pure CSS in the served `style.css`, so it toggles the same way as the rest
+of the look: edit the file and it lands in about a second.
+
 ### Escape hatches
 
 - `/* dshld-off */` anywhere in the served `style.css` turns the whole effect off

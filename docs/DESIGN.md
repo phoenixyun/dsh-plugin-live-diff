@@ -405,6 +405,17 @@ The liquid-glass effect uses `backdrop-filter: url(#dshld-lg-lens)` — an SVG
 displacement filter painted behind big panels. Where the browser refuses it, the
 stylesheet falls back to plain blur; the liquid switch makes that explicit.
 
+**Titlebar chrome rides on the same stylesheet.** The Windows caption row reserves
+40 px above every column; the conversation header below it repeats a title row and
+a view row. When `data-windows-titlebar` marks the window, the served stylesheet
+turns the session header into a fixed 40 px row inside that band and lays its three
+children (leading seat, title row, view tabs) out as one line. The DOM is never
+touched, so React keeps every node; only geometry changes. The left inset comes from
+`--dsh-windows-sidebar-width` (with a floor for the collapsed sidebar, where the
+native caption entries still own the corner), the right inset clears the native
+window controls, and the header carries `-webkit-app-region: drag` with every control
+opted back out to `no-drag`. Fullscreen and ordinary browsers keep the stock header.
+
 ## Layout
 
 | Path | Role |

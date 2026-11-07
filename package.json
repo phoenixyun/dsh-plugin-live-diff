@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-live-diff",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Live streaming diffs for DSH file edits, plus a frosted-glass window backdrop: the diff grows while the model is still emitting the call, and the same stream is painted behind the whole app.",
   "license": "MIT",
   "type": "module",

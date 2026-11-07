@@ -24,3 +24,6 @@ __pycache__/
 Thumbs.db
 .idea/
 .vscode/
+
+# Build artefacts (npm pack output stays out of the repository)
+*.tgz
