@@ -216,3 +216,26 @@ html[data-dshld-backdrop="on"] [data-dshld-glass="inner"] {
   -webkit-backdrop-filter: blur(var(--dshld-inner-blur)) saturate(var(--dshld-saturate)) !important;
   backdrop-filter: blur(var(--dshld-inner-blur)) saturate(var(--dshld-saturate)) !important;
 }
+
+/* --- 4. opaque gradients that are not surfaces ---------------------------- */
+
+/* The shell paints its scroll fades as a gradient that ends in solid white
+ * (composer seat, list bottoms). Their computed background *colour* is
+ * transparent, so the measurement pass never tags them, and they stayed visible
+ * as white bands along the bottom edge. The local name survives CSS-module
+ * hashing, so a suffix match is stable across builds. */
+html[data-dshld-backdrop="on"] [class*="_composerSeat"],
+html[data-dshld-backdrop="on"] [class*="_fade"],
+html[data-dshld-backdrop="on"] [class*="_composerFade"] {
+  background-image: none !important;
+}
+
+/* --- 5. pseudo-element bands --------------------------------------------- */
+
+/* The shell paints its custom titlebar as a 40px ::before band on the layout
+ * frame (`inset: 0 0 <rest>` with a solid surface colour). Pseudo-elements are
+ * invisible to the element scan, so this stayed as a white strip across the top
+ * of the window after every real surface had been glassed. */
+html[data-dshld-backdrop="on"] [class*="_frame"]::before {
+  background: transparent !important;
+}
