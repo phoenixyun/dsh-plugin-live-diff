@@ -1,7 +1,8 @@
 # dsh-plugin-live-diff
 
 给 [DSH](https://github.com/deepseek-ai) 的文件编辑加上**实时流式 diff** —— diff 会随着
-模型吐参数**当场长出来**，而不是等工具调用结束才整块出现。
+模型吐参数**当场长出来**，而不是等工具调用结束才整块出现。0.2.0 起，同一份流还会画在
+**整个应用的背后**，做成一层磨砂玻璃窗口背景。
 
 **[English →](README.md)**
 
@@ -49,12 +50,55 @@ if (typeof oldText !== "string" || typeof newText !== "string") return null;
 - **面板是增量更新 DOM 的**，不是每次轮询整块重建 —— 所以行的淡入动画只播一次，而不是
   每 80ms 重播一次（那看起来就是"一直在闪"）。
 
+## 窗口背景
+
+同一份读数会画在整个应用的背后。宿主那些大块的不透明表面是**量出来的，不是靠类名匹配**
+（视口占比 + 计算后的背景色）：覆盖 ≥85% 窗口的表面会被清空，让背景透出来；不透明面板
+只要 ≥0.1% 就变成磨砂玻璃。一旦某个祖先已经是玻璃，嵌套表面就跳过 —— 两层半透明叠在一起
+会把"磨砂"变成"奶白"，背后的代码就看不见了。
+
+- **液态玻璃**：浏览器支持时，`backdrop-filter: url(#dshld-lg-lens)` 用 SVG 位移滤镜把
+  背景代码折射在大面板后面；不支持时退化成普通模糊。
+- **鼠标光效**：一道柔光跟着光标在玻璃上移动，强度和光斑大小都能调。
+- **前景白字**：玻璃上的灰色正文对比度太低，默认把文字提成白色；它的不透明度是一个滑杆。
+- **标题栏保持原样**：窗口标题栏不变，只有应用区域变成玻璃。
+- **可实时调**：背景样式表是**从磁盘发出来**的，不烤进 bundle，浏览器每 1.5 秒重取一次。
+  改 `style.css` 大约一秒就生效，不用重启、不用重新构建。
+
+### 外观调节面板
+
+右下角一个圆形按钮，打开一个 264px 的面板，含 **9 个滑杆 + 2 个开关**：
+
+| 控件 | 范围 | 作用 |
+| --- | --- | --- |
+| 面板不透明度 | 0.05 – 0.9 | 所有玻璃层共用一个不透明度 |
+| 玻璃模糊 | 0 – 24 px | 背景模糊半径 |
+| 折射强度 | 0 – 40 | 液态玻璃的位移强度 |
+| 高光强度 | 0 – 1 | 鼠标光效的透明度 |
+| 光斑大小 | 80 – 900 px | 光斑半径 |
+| 文字不透明度 | 0.3 – 1 | 白字模式下前景文字 alpha |
+| 代码层亮度 | 0.2 – 1 | 画在背景上的 diff 代码的透明度 |
+| 代码字号 | 12 – 28 px | 背景代码字号 |
+| 背景压暗 | 0 – 1 | 背景上的压暗层 |
+| 界面文字转白色 | 开/关 | 把全部前景提成白色 |
+| 液态玻璃（折射） | 开/关 | 启用 SVG 折射滤镜 |
+
+数值存在 `localStorage`（`dshld.tuner.v2`），面板里的重置按钮把全部控件恢复默认。
+
+### 逃生开关
+
+- 在发出去的 `style.css` 里任意位置写 `/* dshld-off */`，整套效果**当场关闭**；删掉标记
+  就恢复。插件对宿主做的一切都挂在同一个属性（`data-dshld-backdrop`）上，去掉它就是完整还原。
+- `?dshld-demo=1` 会画一份合成的、持续生长的 diff，不用等模型编辑也能调外观。
+- 浏览器控制台里 `window.__dshldDebug.state()` / `.probe()` / `.scan()` / `.demo()` 会报告
+  背景能看到什么、看不到什么。
+
 **只接管渲染。** 不写你的文件，也不修改任何其他包。
 
 ## 环境要求
 
-在 **DSH `0.1.5-rc.1`** / Windows 上开发并验证（`cordis` 4.0.2、
-`dsh-api-session-controller` 0.1.5-rc.2）。
+在 **DSH `0.1.5-rc.1`** 与 DSH 桌面版 **`0.2.1-rc.5`** / Windows 上开发并验证
+（`cordis` 4.0.2）。
 
 这个插件是通过 DSH 的**内部**客户端接口接进去的，**不是**一套已发布的扩展 API。
 下面这些都没有版本承诺：
@@ -64,7 +108,7 @@ if (typeof oldText !== "string" || typeof newText !== "string") return null;
 | `ctx.sessions` 客户端服务 | 读取会话事件窗口 —— 唯一携带流式 `tool-call-delta` chunk 的数据源 |
 | `ctx.slots` / `ctx.sidebarRightTabs` | 注册聊天记录卡片与侧边栏标签类型 |
 | `@deepseek-ai/dsh-client-ui-primitives`（`DiffBlock`） | 聊天记录里的 diff 卡片 |
-| `ctx.webServer` + `ctx.clientModules` | 宿主侧 `/live-diff-diag` 诊断路由 |
+| `ctx.webServer` + `ctx.clientModules` | 宿主侧 `/live-diff-diag` 诊断路由与样式表路由 |
 | 针对 `edit` / `write` 的 keyed `tool.call.toolview` | **替换** DSH 自带的 `FileMutationRow` |
 
 最后一行是最脆的一环：keyed 注册会**替换**官方那一行，也就是说这个插件是在**故意覆盖
@@ -76,47 +120,77 @@ DSH 自带组件**。如果某次 DSH 升级改了工具 key 名、改了 `toolv
 
 ## 安装
 
-两部分，都在 DSH 自己的文件之外。
+包自带 bundle 补丁（`cordis.patch.yml`）并声明了 `dsh.bundle.patch`，所以安装和挂载是一步 ——
+不用建联结，也不用自己写补丁行。
 
-**第一步：让包能被解析到。** 在活动 profile 的 `node_modules` 下建一个联结/符号链接。
-必须这样，**不能**用 `file:` 说明符 —— Loader 解析不了那种写法。
+**从插件市场安装：** 打开 **设置 → 插件 → 插件市场**，搜索 `Live Diffs` /
+`dsh-plugin-live-diff`，点安装。多数客户端插件刷新页面即可生效。
 
-```bat
-:: Windows
-mklink /J "%DSH_HOME%\profiles\node_modules\dsh-plugin-live-diff" "C:\path\to\dsh-plugin-live-diff"
-```
+**命令行安装**（普通 `dsh web` / 自定义 profile）：
 
 ```bash
-# POSIX
-ln -s /path/to/dsh-plugin-live-diff "$DSH_HOME/profiles/node_modules/dsh-plugin-live-diff"
+dsh plugin --profile <profile> add github:phoenixyun/dsh-plugin-live-diff
 ```
 
-**第二步：在 profile 的用户补丁层 `profiles/web/cordis.patch.yml` 里加一行：**
+**DSH 桌面版：** 用应用内的 **设置 → 插件** 安装。桌面版有它自己的插件管理器，用的是桌面
+profile 而不是 `web` profile，所以在命令行装进 `web` 不会出现在桌面端。
 
-```yaml
-- insert:
-    - id: live-diff
-      name: dsh-plugin-live-diff
-```
+运行中的进程**不会**发现新装的宿主包，这一行必须在启动时被看到，所以装完要重启（市场在
+需要时会提供一键重启）。之后对插件源码的修改会被热加载（`patchReload: live`），但
+**改客户端 bundle 仍然要重启 + 硬刷新**（`Ctrl+Shift+R`）—— 普通刷新曾经返回过旧 bundle。
 
-**第三步：重启 `dsh web`。** 运行中的进程**不会**发现新装的包，这一行必须在启动时被看到。
-之后对插件源码的修改会被热加载（`patchReload: live`），但**改客户端 bundle 仍然要重启 +
-硬刷新**（`Ctrl+Shift+R`）—— 普通刷新曾经返回过旧 bundle。
+### 从手工安装迁移
+
+早期版本是手工装的：profile 的 `node_modules` 里一个联结，加上 profile 的
+`cordis.patch.yml` 里一行 `id: live-diff`。装带 bundle 的版本之前，先删掉那行手工补丁
+（以及联结）——两个都留着会把插件加载两次。
+
+### 开发用安装（链接一份 checkout）
+
+两部分，都在 DSH 自己的文件之外。
+
+1. 让包能被活动 profile 的 `node_modules` 解析到。用联结/符号链接，**不能**用 `file:`
+   说明符 —— Loader 解析不了那种写法。
+
+   ```bat
+   :: Windows
+   mklink /J "%DSH_HOME%\profiles\<profile>\node_modules\dsh-plugin-live-diff" "C:\path\to\dsh-plugin-live-diff"
+   ```
+
+   ```bash
+   # POSIX
+   ln -s /path/to/dsh-plugin-live-diff "$DSH_HOME/profiles/<profile>/node_modules/dsh-plugin-live-diff"
+   ```
+
+2. 在 `profiles/<profile>/cordis.patch.yml` 里加 bundle 行：
+
+   ```yaml
+   - insert:
+       - id: dsh-plugin-live-diff
+         name: dsh-plugin-live-diff
+   ```
+
+3. 重启 DSH。
 
 ## 验证
 
 ```bash
-node test/parser.test.mjs      # 容错读取器，覆盖真实调用的每个截断点
-node test/overlay.test.mjs     # 增量 DOM 更新、拖拽调宽
-node test/apply.test.mjs       # 注册，以及 CSS/布局守卫
-node test/highlight.test.mjs   # 语言识别与分词
-node test/host.test.mjs        # 宿主侧诊断路由
+npm test
 ```
 
-五个都应当以 0 退出。
+六个套件各打一行：
 
-然后让模型编辑一个文件，看面板。如果面板一直是空的，它自己的诊断页脚和宿主日志会告诉你
-原因（见下）。
+| 套件 | 覆盖什么 |
+| --- | --- |
+| `parser.test.mjs` | 容错读取器，在真实调用的 25 个截断点上验证 |
+| `apply.test.mjs` | 注册，以及布局与清单守卫 |
+| `host.test.mjs` | 两条宿主路由的端到端验证（不需要服务器） |
+| `highlight.test.mjs` | 语言识别与分词 |
+| `overlay.test.mjs` | 增量 DOM 更新、拖拽调宽、滚动、结束后状态 |
+| `audit.mjs` | bundle 静态审查：死函数、重复声明、未在 `dsh.client.inject` 里声明的 `require()` |
+
+六个都应当以 0 退出。然后让模型编辑一个文件，看面板。如果面板一直是空的，它自己的诊断
+页脚和宿主日志会告诉你原因（见下）。
 
 ## 诊断
 
@@ -142,8 +216,8 @@ POST 到 `/live-diff-diag`，宿主侧追加写进日志文件：
 ## 设计笔记
 
 那些不显然的决定 —— 为什么面板是原生 DOM 而不是 React、为什么放弃了侧边栏方案、为什么
-没有直接移植 Cline 的组件、实测的传输粒度、以及两次踩中的布局陷阱 —— 都在
-[`docs/DESIGN.md`](docs/DESIGN.md)（英文）。
+没有直接移植 Cline 的组件、实测的传输粒度、两次踩中的布局陷阱，以及背景那套"量表面、
+绝不按类名匹配"的规矩 —— 都在 [`docs/DESIGN.md`](docs/DESIGN.md)（英文）。
 
 ## 致谢
 

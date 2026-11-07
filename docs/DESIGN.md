@@ -372,13 +372,48 @@ family (and also carries `*** Begin Patch` / `*** Update File` markers). The
 `<<<<<<< SEARCH` form in older public docs is a different prompt generation, not what
 this bundle's renderer matches.
 
+## The window backdrop (0.2.0)
+
+The same stream is painted behind the entire app: a fixed layer under `#root`, plus
+surgery on the shell so its surfaces become glass. Three decisions carried it.
+
+**Measure surfaces; never match class names.** The shell's surface classes are
+CSS-module hashes that change between builds, so a selector-based approach would
+break silently. Instead every element under `#root` is measured: area ≥85% of the
+viewport becomes `data-dshld-clear` (the frame itself must let the backdrop through),
+opaque panels ≥0.1% with a computed opaque background become `data-dshld-glass` with
+their opacity/blur written as inline custom properties. The *first* computed
+background is cached in a `WeakMap`: after one pass the computed value is partly our
+own output, so re-reading it makes a surface stop looking opaque, get un-tagged, look
+white again next pass — a 900 ms flicker. Nested surfaces are skipped once an ancestor
+is glassed; two stacked translucent layers turn "frosted" into "milky".
+
+**Serve the stylesheet, don't bundle it.** The look is visual and its author cannot
+open a browser, so `lib/index.js` serves `style.css` at `/live-diff-style.css` and the
+browser re-fetches it every 1.5 s (`cache-control: no-store`). Editing the file lands
+in the running app within a second, with no restart and no rebuild. The same route
+carries the kill switch: `/* dshld-off */` in the file turns everything off, deleting
+the marker turns it back on. Everything else is keyed on one attribute
+(`data-dshld-backdrop`), so dropping it is a complete revert.
+
+**One tuner, not a settings schema.** The plugin does not register a host settings
+namespace; it owns a small floating panel (9 sliders + 2 switches) that writes CSS
+custom properties and an SVG filter's attributes. Host settings APIs differ between
+DSH releases, while CSS custom properties and `localStorage` (`dshld.tuner.v2`) do not.
+
+The liquid-glass effect uses `backdrop-filter: url(#dshld-lg-lens)` — an SVG
+displacement filter painted behind big panels. Where the browser refuses it, the
+stylesheet falls back to plain blur; the liquid switch makes that explicit.
+
 ## Layout
 
 | Path | Role |
 | --- | --- |
-| `lib/client.js` | Browser half: incremental reader, diff derivation, the card. |
-| `lib/index.js` | Host half: registers the `/live-diff-diag` webServer route the browser beacons to. `inject = ["webServer", "clientModules"]`. |
-| `package.json` | `dsh.client` declaration that puts the browser half on the Web boot graph. |
+| `lib/client.js` | Browser half: incremental reader, diff derivation, the card, the window backdrop and the appearance tuner. |
+| `lib/index.js` | Host half: `/live-diff-diag` diagnostic route plus the served `/live-diff-style.css`. `inject = ["webServer", "clientModules"]`. |
+| `style.css` | The backdrop stylesheet, served from disk so edits are live. |
+| `cordis.patch.yml` | Bundle patch row (`dsh.bundle.patch`), so `dsh plugin add` mounts the plugin. |
+| `package.json` | `dsh.bundle` + `dsh.client` declarations that put both halves on the boot graph. |
 | `test/parser.test.mjs` | Regression tests over every truncation point of a real call. |
 
 The served `client.js` registers its own factory
@@ -400,7 +435,11 @@ why this plugin does not carry its own diff renderer.
 
 ## Mounting
 
-Two pieces, both outside DSH's own files:
+The package declares `dsh.bundle.patch` and ships `cordis.patch.yml`, so
+`dsh plugin add` (and the DSH plugin market) install and mount it in one step.
+
+The hand-install path still exists for development, and has two pieces outside DSH's
+own files:
 
 1. A junction so the profile can resolve the bare package name (the same mechanism
    DSH's own packages use; a `file:` URL specifier does **not** resolve through the
@@ -408,18 +447,18 @@ Two pieces, both outside DSH's own files:
    wherever you cloned this plugin:
 
    ```
-   <DSH_HOME>\profiles\node_modules\dsh-plugin-live-diff
+   <DSH_HOME>\profiles\<profile>\node_modules\dsh-plugin-live-diff
        -> <path to your clone>\dsh-plugin-live-diff
    ```
 
    On Windows that is `mklink /J <link> <target>`; on POSIX a symlink works the
    same way.
 
-2. A row in the profile's user patch layer, `profiles\web\cordis.patch.yml`:
+2. A row in the profile's user patch layer, `profiles\<profile>\cordis.patch.yml`:
 
    ```yaml
    - insert:
-       - id: live-diff
+       - id: dsh-plugin-live-diff
          name: dsh-plugin-live-diff
    ```
 

@@ -2,7 +2,8 @@
 
 Live streaming diffs for [DSH](https://github.com/deepseek-ai) file edits — a diff
 that **grows while the model is still emitting the call**, instead of appearing all
-at once when the tool call settles.
+at once when the tool call settles. Since 0.2.0 the same stream is also painted
+**behind the whole app** as a frosted-glass window backdrop.
 
 **[中文说明 →](README.zh-CN.md)**
 
@@ -18,7 +19,7 @@ at once when the tool call settles.
 
 ## Demo
 
-[A 26-second demo on Bilibili — "deepseek v4.1 flash 太强大了 50元手搓文件变更实时预览"](https://www.bilibili.com/video/BV1N6YB6KESy/)\
+[26-second demo on Bilibili — "deepseek v4.1 flash 太强大了 50元手搓文件变更实时预览"](https://www.bilibili.com/video/BV1N6YB6KESy/)\
 *Live Diffs for DSH — 边写边看的编辑过程*
 
 ## The problem
@@ -52,13 +53,68 @@ reader, and a surface to put the result on.
 - **A finished edit is not re-rendered row by row** — the DOM is patched
   incrementally, so a line's fade-in plays once instead of restarting on every poll.
 
+## The window backdrop
+
+The same reading is painted behind the entire app. The shell's large opaque
+surfaces are **measured, not matched by class name** (viewport area + computed
+background): surfaces covering ≥85% of the window are cleared so the backdrop can
+show through, and opaque panels ≥0.1% become frosted glass. Nested surfaces are
+skipped once an ancestor is glassed — two stacked translucent layers turn
+"frosted" into "milky".
+
+- **Liquid glass**: in browsers that accept it, `backdrop-filter: url(#dshld-lg-lens)`
+  refracts the diff behind big panels through an SVG displacement filter; elsewhere
+  it degrades to plain blur.
+- **Pointer light**: a soft sheen follows the cursor across the glass; its strength
+  and radius are tunable.
+- **White foregrounds**: over glass the shell's grey text loses contrast, so text is
+  lifted to white by default — and its opacity is a slider.
+- **Titlebar untouched**: the window's titlebar keeps the stock look; only the app
+  area becomes glass.
+- **Live-tunable**: the backdrop stylesheet is *served* from disk rather than baked
+  into the bundle, and the browser re-fetches it every 1.5 s. Edits to `style.css`
+  land in about a second, with no restart and no rebuild.
+
+### Appearance tuner
+
+A round button at the bottom-right corner opens a 264 px panel with **9 sliders and
+2 switches** (中文界面):
+
+| Control | Range | What it changes |
+| --- | --- | --- |
+| 面板不透明度 | 0.05 – 0.9 | one opacity for every glass band |
+| 玻璃模糊 | 0 – 24 px | backdrop blur radius |
+| 折射强度 | 0 – 40 | liquid-glass displacement scale |
+| 高光强度 | 0 – 1 | pointer-light sheen opacity |
+| 光斑大小 | 80 – 900 px | sheen radius |
+| 文字不透明度 | 0.3 – 1 | foreground text alpha (white-text mode) |
+| 代码层亮度 | 0.2 – 1 | opacity of the diff painted behind the app |
+| 代码字号 | 12 – 28 px | size of that backdrop code |
+| 背景压暗 | 0 – 1 | veil over the backdrop |
+| 界面文字转白色 | on/off | lift every foreground to white |
+| 液态玻璃（折射） | on/off | use the SVG refraction filter |
+
+Values persist in `localStorage` (`dshld.tuner.v2`); the panel's reset button puts
+every control back to its default.
+
+### Escape hatches
+
+- `/* dshld-off */` anywhere in the served `style.css` turns the whole effect off
+  live; deleting the marker turns it back on. Everything the plugin does to the
+  shell is keyed on one attribute (`data-dshld-backdrop`), so dropping it is a
+  complete revert.
+- `?dshld-demo=1` paints a synthetic, steadily growing diff so the look can be
+  worked on without waiting for a model edit.
+- `window.__dshldDebug.state()` / `.probe()` / `.scan()` / `.demo()` in the browser
+  console report what the backdrop can and cannot see.
+
 It replaces rendering only. It writes nothing to your files and modifies no other
 package.
 
 ## Requirements
 
-Built and verified against **DSH `0.1.5-rc.1`** on Windows (`cordis` 4.0.2,
-`dsh-api-session-controller` 0.1.5-rc.2).
+Built and verified against **DSH `0.1.5-rc.1`** and the DSH desktop app on
+**`0.2.1-rc.5`**, Windows (`cordis` 4.0.2).
 
 This plugin talks to DSH through its **internal** client surfaces, not a published
 extension API. Nothing here is versioned or guaranteed:
@@ -68,7 +124,7 @@ extension API. Nothing here is versioned or guaranteed:
 | `ctx.sessions` client service | reading the session event window — the only source carrying streaming `tool-call-delta` chunks |
 | `ctx.slots` / `ctx.sidebarRightTabs` | registering the transcript card and the sidebar tab type |
 | `@deepseek-ai/dsh-client-ui-primitives` (`DiffBlock`) | the chat transcript card |
-| `ctx.webServer` + `ctx.clientModules` | the host-side `/live-diff-diag` route |
+| `ctx.webServer` + `ctx.clientModules` | the host-side `/live-diff-diag` diagnostic route and the served stylesheet |
 | keyed `tool.call.toolview` entries for `edit` / `write` | **replacing** the shipped `FileMutationRow` for those two tools |
 
 That last row is the sharpest edge: a keyed registration replaces the shipped row,
@@ -82,38 +138,68 @@ panel reports what it can and cannot see rather than failing silently.
 
 ## Install
 
-Two pieces, both outside DSH's own files.
+The package ships its own bundle patch (`cordis.patch.yml`) and declares
+`dsh.bundle.patch`, so it installs and mounts in one step — no junction, no
+hand-written patch row.
 
-**1. Make the package resolvable** under the active profile's `node_modules`.
-A junction/symlink, not a `file:` specifier — the Loader does not resolve those.
+**From the plugin market:** open **Settings → Plugins → Plugin Market** (插件 →
+插件市场), search for `Live Diffs` / `dsh-plugin-live-diff`, and install. Most
+client plugins work after a page refresh.
 
-```bat
-:: Windows
-mklink /J "%DSH_HOME%\profiles\node_modules\dsh-plugin-live-diff" "C:\path\to\dsh-plugin-live-diff"
-```
+**From the command line** (plain `dsh web` / custom profiles):
 
 ```bash
-# POSIX
-ln -s /path/to/dsh-plugin-live-diff "$DSH_HOME/profiles/node_modules/dsh-plugin-live-diff"
+dsh plugin --profile <profile> add github:phoenixyun/dsh-plugin-live-diff
 ```
 
-**2. Add a row** to the profile's user patch layer, `profiles/web/cordis.patch.yml`:
+**DSH Desktop:** use the in-app **Settings → Plugins** page. The desktop app keeps
+its own plugin manager and its profile is not the `web` profile, so a CLI install
+does not reach it.
 
-```yaml
-- insert:
-    - id: live-diff
-      name: dsh-plugin-live-diff
-```
+A running process does not pick up a new host package; the row has to be seen at
+startup, so restart after installing (the market offers a one-click restart when it
+is needed). After that, edits to the plugin are picked up live (`patchReload: live`),
+but **client-bundle changes still need a restart plus a hard refresh**
+(`Ctrl+Shift+R`) — a plain refresh has served a stale bundle.
 
-**3. Restart `dsh web`.** A running process does not pick up a new package; the row
-has to be seen at startup. After that, edits to the plugin are picked up live
-(`patchReload: live`), but **client-bundle changes still need a restart plus a hard
-refresh** (`Ctrl+Shift+R`) — a plain refresh has served a stale bundle.
+### Migrating from a hand install
+
+Earlier versions were installed by hand: a junction in the profile's `node_modules`
+plus an `id: live-diff` row in the profile's `cordis.patch.yml`. Remove that manual
+row (and the junction) before installing the bundled version — leaving both would
+load the plugin twice.
+
+### Development install (link a checkout)
+
+Two pieces, both outside DSH's own files.
+
+1. Make the package resolvable under the active profile's `node_modules`. A
+   junction/symlink, not a `file:` specifier — the Loader does not resolve those.
+
+   ```bat
+   :: Windows
+   mklink /J "%DSH_HOME%\profiles\<profile>\node_modules\dsh-plugin-live-diff" "C:\path\to\dsh-plugin-live-diff"
+   ```
+
+   ```bash
+   # POSIX
+   ln -s /path/to/dsh-plugin-live-diff "$DSH_HOME/profiles/<profile>/node_modules/dsh-plugin-live-diff"
+   ```
+
+2. Add the bundle row to `profiles/<profile>/cordis.patch.yml`:
+
+   ```yaml
+   - insert:
+       - id: dsh-plugin-live-diff
+         name: dsh-plugin-live-diff
+   ```
+
+3. Restart DSH.
 
 ## Verify it works
 
 ```bash
-node test/run-all.mjs
+npm test
 ```
 
 That runs six suites and prints one line each:
@@ -122,7 +208,7 @@ That runs six suites and prints one line each:
 | --- | --- |
 | `parser.test.mjs` | the tolerant reader, truncating a real tool call at 25 points |
 | `apply.test.mjs` | registration, plus layout and manifest guards |
-| `host.test.mjs` | the diagnostics route end to end, without a server |
+| `host.test.mjs` | both host routes end to end, without a server |
 | `highlight.test.mjs` | language detection and tokenising |
 | `overlay.test.mjs` | incremental DOM patching, resize, scroll, the finished state |
 | `audit.mjs` | static audit of the bundle: dead helpers, duplicate declarations, `require()` specifiers missing from `dsh.client.inject` |
@@ -157,7 +243,8 @@ diff.
 
 The reasoning behind the non-obvious decisions — why the panel is plain DOM rather
 than React, why the sidebar was abandoned, why Cline's components were not ported,
-the measured transport granularity, and the layout traps that shipped twice — is in
+the measured transport granularity, the layout traps that shipped twice, and the
+"measure surfaces, never match class names" rule behind the backdrop — is in
 [`docs/DESIGN.md`](docs/DESIGN.md).
 
 ## Credits

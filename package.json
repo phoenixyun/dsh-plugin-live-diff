@@ -1,7 +1,7 @@
 {
   "name": "dsh-plugin-live-diff",
-  "version": "0.1.0",
-  "description": "Live streaming diffs for DSH file edits: a growing diff card rendered while the model is still emitting the edit arguments.",
+  "version": "0.2.0",
+  "description": "Live streaming diffs for DSH file edits, plus a frosted-glass window backdrop: the diff grows while the model is still emitting the call, and the same stream is painted behind the whole app.",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",
@@ -12,9 +12,36 @@
     "./client": {
       "default": "./lib/client.js"
     },
+    "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
+  "keywords": [
+    "deepseek",
+    "harness",
+    "dsh",
+    "dsh-plugin",
+    "live-diff",
+    "streaming",
+    "diff",
+    "glass",
+    "backdrop",
+    "ui"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/phoenixyun/dsh-plugin-live-diff.git"
+  },
+  "homepage": "https://github.com/phoenixyun/dsh-plugin-live-diff#readme",
+  "bugs": {
+    "url": "https://github.com/phoenixyun/dsh-plugin-live-diff/issues"
+  },
+  "engines": {
+    "dsh": ">=0.1.5-rc.1"
+  },
   "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "platform": "web",
       "inject": [
@@ -25,8 +52,17 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2"
   },
+  "scripts": {
+    "test": "node test/run-all.mjs"
+  },
   "files": [
     "lib/index.js",
-    "lib/client.js"
+    "lib/client.js",
+    "style.css",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh-CN.md",
+    "docs/DESIGN.md",
+    "LICENSE"
   ]
 }

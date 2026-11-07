@@ -1,0 +1,14 @@
+# Bundle patch layer: inserts this plugin into a profile's layer stack.
+#
+# The row id and the package name are the same, which is the client-plugin
+# convention: the host row, the client module id and the package name stay
+# aligned. `dsh.bundle.patch` in package.json points here, so `dsh plugin add`
+# (and the DSH plugin market) can install and mount the plugin in one step —
+# no manual junction, no hand-written patch row.
+#
+# If you previously installed this plugin by hand (junction + an `id: live-diff`
+# row in your profile's cordis.patch.yml), remove that manual row first: leaving
+# both would load the plugin twice.
+- insert:
+    - id: dsh-plugin-live-diff
+      name: dsh-plugin-live-diff
